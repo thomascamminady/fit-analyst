@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
 :root {
     --bs-body-font-family: 'Inter', system-ui, -apple-system, sans-serif;
     --bs-body-bg: #ffffff;
@@ -10,6 +12,7 @@ body {
     font-family: var(--bs-body-font-family);
     -webkit-font-smoothing: antialiased;
     color: #1f2937;
+    background-color: #f9fafb;
 }
 
 /* --- Loader --- */
@@ -25,143 +28,129 @@ body {
     align-items: center;
     justify-content: center;
     flex-direction: column;
+    backdrop-filter: blur(5px);
 }
 
 /* --- Navigation --- */
 .navbar {
-    backdrop-filter: blur(8px);
-    background-color: rgba(255, 255, 255, 0.95) !important;
+    backdrop-filter: blur(12px);
+    background-color: rgba(255, 255, 255, 0.9) !important;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 }
 
 .nav-pills .nav-link {
     font-size: 0.85rem;
     font-weight: 500;
     color: var(--text-muted);
-    padding-top: 0.4rem;
-    padding-bottom: 0.4rem;
+    transition: all 0.2s;
 }
 
 .nav-pills .nav-link.active {
-    background-color: #f3f4f6;
-    color: #111827;
+    background-color: #eff6ff;
+    color: var(--bs-primary);
+    font-weight: 600;
 }
 
 /* --- Map --- */
+#mapContainer {
+    background: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 4px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
 #map {
-    height: 300px;
+    height: 320px;
     width: 100%;
     z-index: 1;
-    background: #f9fafb;
-}
-
-/* --- Statistics Box --- */
-.stat-card {
-    flex: 1 1 45%;
-    /* 2 cols */
-    background: #f9fafb;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 8px 12px;
-}
-
-.stat-label {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    letter-spacing: 0.5px;
-}
-
-.stat-value {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #111827;
+    background: #f3f4f6;
+    border-radius: 0.375rem;
 }
 
 /* --- Charts --- */
-.uplot {
-    font-family: inherit !important;
-}
-
 .chart-wrapper {
     position: relative;
     background: #fff;
-    margin-bottom: 20px;
-    /* No borders/shadows for flat look */
+    margin-bottom: 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px 16px 0 16px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
 .u-legend {
+    font-family: 'Inter', sans-serif !important;
     font-size: 12px !important;
 }
 
 /* --- Tables --- */
+/* Ensure DataTables wrappers don't overflow */
+.dataTables_wrapper {
+    width: 100%;
+    overflow: hidden;
+    /* Let the internal scrollX handle scrolling */
+}
+
 .table {
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     margin-bottom: 0;
+    width: 100% !important;
+    /* Force 100% width inside DataTable */
 }
 
 .table th {
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
-    font-size: 0.75rem;
-    border-bottom-width: 1px;
-    background: #fff;
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+    background: #f9fafb;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+    /* Keep headers on one line */
 }
 
 .table td {
     vertical-align: middle;
     color: #374151;
-    border-bottom-color: #f3f4f6;
+    border-bottom: 1px solid #f3f4f6;
+    white-space: nowrap;
+    /* Prevent weird wrapping */
 }
 
-/* DataTables Overrides */
-div.dataTables_wrapper div.dataTables_filter input {
-    border-radius: 4px;
-    padding: 4px 8px;
-    border: 1px solid var(--border-color);
-    font-size: 0.85rem;
-}
-
-div.dataTables_wrapper div.dataTables_length select {
-    border-radius: 4px;
-    font-size: 0.85rem;
-    padding: 4px 24px 4px 8px;
-    border: 1px solid var(--border-color);
-}
-
-.page-item.active .page-link {
-    background-color: var(--bs-primary);
-    border-color: var(--bs-primary);
-}
-
-/* Scrollbar */
-.simple-scrollbar::-webkit-scrollbar {
+/* Scrollbars */
+.simple-scrollbar::-webkit-scrollbar,
+.dataTables_scrollBody::-webkit-scrollbar {
     width: 6px;
     height: 6px;
 }
 
-.simple-scrollbar::-webkit-scrollbar-track {
+.simple-scrollbar::-webkit-scrollbar-track,
+.dataTables_scrollBody::-webkit-scrollbar-track {
     background: transparent;
 }
 
-.simple-scrollbar::-webkit-scrollbar-thumb {
+.simple-scrollbar::-webkit-scrollbar-thumb,
+.dataTables_scrollBody::-webkit-scrollbar-thumb {
     background: #d1d5db;
     border-radius: 3px;
 }
 
-.simple-scrollbar::-webkit-scrollbar-thumb:hover {
+.simple-scrollbar::-webkit-scrollbar-thumb:hover,
+.dataTables_scrollBody::-webkit-scrollbar-thumb:hover {
     background: #9ca3af;
 }
 
 /* Utilities */
 .animate-fade-in {
-    animation: fadeIn 0.3s ease-out forwards;
+    animation: fadeIn 0.25s ease-out forwards;
 }
 
 @keyframes fadeIn {
     from {
         opacity: 0;
-        transform: translateY(-5px);
+        transform: translateY(-4px);
     }
 
     to {
