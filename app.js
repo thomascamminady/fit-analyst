@@ -4,13 +4,18 @@ import FitParser from "https://esm.sh/fit-file-parser@1.9.5?bundle";
 const APP = {
     files: {},
     activeFile: null,
+
+    // Map Objects
     map: null,
-    polyline: null,
-    positionMarker: null,
-    gpsData: [],
+    basePolyline: null, // The blue line (always visible)
+    highlightPolyline: null, // The red line (selection only)
+    positionMarker: null, // The moving dot
+    fullBounds: null, // The bounding box of the entire route
+
+    // Data
+    gpsData: [], // { lat, lon, ts, i }
     records: [],
     charts: [],
-    syncKey: null,
     currentSelection: [],
 };
 
@@ -75,7 +80,7 @@ function init() {
     document.querySelectorAll('button[data-bs-toggle="pill"]').forEach((el) => {
         el.addEventListener("shown.bs.tab", () => {
             APP.map.invalidateSize();
-            if (APP.polyline) APP.map.fitBounds(APP.polyline.getBounds());
+            if (APP.fullBounds) APP.map.fitBounds(APP.fullBounds);
         });
     });
 }
@@ -143,6 +148,20 @@ function switchFile(fileName) {
     APP.records = data.records || [];
     APP.currentSelection = [];
 
+    // Build GPS Index with Timestamps for filtering
+    APP.gpsData = [];
+    APP.records.forEach((r, i) => {
+        if (r.position_lat && r.position_long) {
+            APP.gpsData.push({
+                i: i,
+                lat: r.position_lat,
+                lon: r.position_long,
+                ts: new Date(r.timestamp).getTime() / 1000, // seconds
+            });
+        }
+    });
+
+    // Reset Chart Area
     APP.charts.forEach((u) => u.destroy());
     APP.charts = [];
     UI.chartsContainer.innerHTML = "";
@@ -152,64 +171,101 @@ function switchFile(fileName) {
     UI.chartsPlaceholder.classList.remove("d-none");
     UI.chartsPlaceholder.classList.add("d-flex");
 
-    renderMap(data.records);
+    // Render Views
+    initMap(APP.gpsData); // Draw the permanent full trace
     renderLaps(data.laps);
-    renderCharts(data.records);
+    renderCharts(APP.records);
 
     if (document.getElementById("explorer").classList.contains("active")) {
         renderExplorer();
     }
 }
 
-// --- MAP ---
-function renderMap(records) {
-    APP.gpsData = [];
-    const latLongs = [];
+// --- MAP LOGIC ---
+function initMap(gpsPoints) {
+    // Clear existing layers
+    if (APP.basePolyline) APP.map.removeLayer(APP.basePolyline);
+    if (APP.highlightPolyline) APP.map.removeLayer(APP.highlightPolyline);
+    if (APP.positionMarker) APP.map.removeLayer(APP.positionMarker);
 
-    records.forEach((r, i) => {
-        if (r.position_lat && r.position_long) {
-            APP.gpsData.push({
-                i: i,
-                lat: r.position_lat,
-                lon: r.position_long,
-            });
-            latLongs.push([r.position_lat, r.position_long]);
-        }
-    });
+    APP.basePolyline = null;
+    APP.highlightPolyline = null;
+    APP.fullBounds = null;
 
-    if (latLongs.length > 0) {
-        UI.mapContainer.classList.remove("d-none");
-
-        if (APP.polyline) APP.map.removeLayer(APP.polyline);
-        if (APP.positionMarker) APP.map.removeLayer(APP.positionMarker);
-
-        APP.polyline = L.polyline(latLongs, {
-            color: "#2563eb",
-            weight: 3,
-            opacity: 0.8,
-        }).addTo(APP.map);
-
-        APP.positionMarker = L.circleMarker([0, 0], {
-            radius: 6,
-            fillColor: "#fff",
-            color: "#2563eb",
-            weight: 3,
-            opacity: 0,
-            fillOpacity: 0,
-        }).addTo(APP.map);
-
-        setTimeout(() => {
-            APP.map.invalidateSize();
-            APP.map.fitBounds(APP.polyline.getBounds(), { padding: [30, 30] });
-        }, 100);
-    } else {
+    if (!gpsPoints || gpsPoints.length === 0) {
         UI.mapContainer.classList.add("d-none");
+        return;
+    }
+
+    UI.mapContainer.classList.remove("d-none");
+
+    // 1. Draw the Full Trace (Blue, persistent)
+    const latLongs = gpsPoints.map((p) => [p.lat, p.lon]);
+    APP.basePolyline = L.polyline(latLongs, {
+        color: "#2563eb", // Blue
+        weight: 3,
+        opacity: 0.6,
+    }).addTo(APP.map);
+
+    // 2. Initialize Highlight Layer (Red, empty initially)
+    APP.highlightPolyline = L.polyline([], {
+        color: "#dc2626", // Red
+        weight: 4,
+        opacity: 1,
+    }).addTo(APP.map);
+
+    // 3. Initialize Marker
+    APP.positionMarker = L.circleMarker([0, 0], {
+        radius: 6,
+        fillColor: "#fff",
+        color: "#2563eb",
+        weight: 3,
+        opacity: 0,
+        fillOpacity: 0,
+    }).addTo(APP.map);
+
+    // 4. Save Bounds and Fit Map
+    APP.fullBounds = APP.basePolyline.getBounds();
+
+    setTimeout(() => {
+        APP.map.invalidateSize();
+        APP.map.fitBounds(APP.fullBounds, { padding: [30, 30] });
+    }, 100);
+}
+
+function syncMapSelection(minX, maxX) {
+    if (!APP.gpsData.length) return;
+
+    // 1. Reset: If no range provided, clear highlight and zoom out
+    if (minX === null || maxX === null) {
+        APP.highlightPolyline.setLatLngs([]);
+        if (APP.fullBounds) {
+            APP.map.fitBounds(APP.fullBounds, { padding: [30, 30] });
+        }
+        return;
+    }
+
+    // 2. Filter GPS points in range
+    const selectedPoints = APP.gpsData.filter(
+        (p) => p.ts >= minX && p.ts <= maxX
+    );
+
+    if (selectedPoints.length > 0) {
+        const latLongs = selectedPoints.map((p) => [p.lat, p.lon]);
+
+        // Draw Highlight
+        APP.highlightPolyline.setLatLngs(latLongs);
+
+        // Zoom to Highlight Bounds
+        const bounds = L.latLngBounds(latLongs);
+        APP.map.fitBounds(bounds, { padding: [50, 50] });
     }
 }
 
 function syncMapCursor(idx) {
     if (!APP.gpsData.length || !APP.positionMarker) return;
 
+    // Find nearest point
     const point =
         APP.gpsData.find((p) => p.i === idx) ||
         APP.gpsData.find((p) => p.i > idx - 5 && p.i < idx + 5);
@@ -306,16 +362,21 @@ function renderCharts(records) {
 }
 
 function updateSelectionStats(u) {
+    // Case: Reset / Zoom Out (Double Click)
     if (u.select.width === 0) {
         UI.statsContainer.classList.add("d-none");
         UI.selectionTableContainer.classList.add("d-none");
         APP.currentSelection = [];
+
+        // Reset Map to full view
+        syncMapSelection(null, null);
         return;
     }
 
     const minX = u.posToVal(u.select.left, "x");
     const maxX = u.posToVal(u.select.left + u.select.width, "x");
 
+    // Filter Data
     const subset = APP.records.filter((r) => {
         const t = new Date(r.timestamp).getTime() / 1000;
         return t >= minX && t <= maxX;
@@ -324,21 +385,22 @@ function updateSelectionStats(u) {
     if (subset.length === 0) return;
     APP.currentSelection = subset;
 
+    // Update Tables
     renderAvgTable(subset);
     renderSelectionTable(subset);
+
+    // Update Map (Zoom to bounds + Highlight)
+    syncMapSelection(minX, maxX);
 }
 
-// Renders a single row summarizing the selection, matching Lap table columns
+// --- TABLE RENDERERS ---
 function renderAvgTable(subset) {
     UI.statsContainer.classList.remove("d-none");
 
-    // Calculate Aggregates
     const first = subset[0];
     const last = subset[subset.length - 1];
     const duration =
         (new Date(last.timestamp) - new Date(first.timestamp)) / 1000;
-
-    // Distance diff (handle if distance field missing)
     const dist =
         last.distance && first.distance ? last.distance - first.distance : 0;
 
@@ -364,7 +426,6 @@ function renderAvgTable(subset) {
         $("#avgTable").DataTable().destroy();
     }
 
-    // Unified Columns config shared with renderLaps logic ideally
     const columns = [
         { title: "#", data: "index", width: "10%" },
         {
@@ -406,7 +467,7 @@ function renderAvgTable(subset) {
         searching: false,
         info: false,
         ordering: false,
-        dom: "t", // Just the table
+        dom: "t",
     });
 }
 
@@ -596,7 +657,6 @@ async function copyTableToClipboard(tableId) {
     if (!table) return;
 
     let csv = [];
-    // Get headers
     const thead = table.querySelector("thead");
     if (thead) {
         const headers = [];
@@ -606,11 +666,10 @@ async function copyTableToClipboard(tableId) {
         csv.push(headers.join("\t"));
     }
 
-    // Get body rows
     const rows = table.querySelectorAll("tbody tr");
     rows.forEach((row) => {
         const cols = row.querySelectorAll("td");
-        if (cols.length === 0) return; // skip empty/loading
+        if (cols.length === 0) return;
         const rowData = [];
         cols.forEach((col) => rowData.push(col.innerText));
         csv.push(rowData.join("\t"));
@@ -618,12 +677,10 @@ async function copyTableToClipboard(tableId) {
 
     await navigator.clipboard.writeText(csv.join("\n"));
 
-    // Visual feedback
     const btn =
         document.querySelector(
             `button[id*="${tableId.replace("Table", "").toLowerCase()}"]`
         ) || document.getElementById("copyExplorerBtn");
-
     if (btn) {
         const original = btn.innerHTML;
         btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="#198754" class="bi bi-check-lg" viewBox="0 0 16 16"><path d="M12.736 3.97a.733.733 0 0 1 1.047 0c.286.289.29.756.01 1.05L7.88 12.01a.733.733 0 0 1-1.065.02L3.217 8.384a.757.757 0 0 1 0-1.06.733.733 0 0 1 1.047 0l3.052 3.093 5.4-6.425a.247.247 0 0 1 .02-.022Z"/></svg>`;
