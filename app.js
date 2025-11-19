@@ -7,10 +7,11 @@ const APP = {
     map: null,
     polyline: null,
     positionMarker: null,
-    gpsData: [], // {i, lat, lon}
-    records: [], // Current full records array
+    gpsData: [],
+    records: [],
     charts: [],
     syncKey: null,
+    currentSelection: [],
 };
 
 // --- UI References ---
@@ -33,6 +34,11 @@ const UI = {
 
     datatableEl: document.getElementById("datatable"),
     radioInputs: document.querySelectorAll('input[name="dataView"]'),
+
+    copyAvgBtn: document.getElementById("copyAvgBtn"),
+    copyLapsBtn: document.getElementById("copyLapsBtn"),
+    copySelBtn: document.getElementById("copySelBtn"),
+    copyExplorerBtn: document.getElementById("copyExplorerBtn"),
 };
 
 // --- Init ---
@@ -51,6 +57,19 @@ function init() {
     UI.btnDownload.addEventListener("click", downloadAllFiles);
     UI.radioInputs.forEach((radio) =>
         radio.addEventListener("change", renderExplorer)
+    );
+
+    UI.copyAvgBtn.addEventListener("click", () =>
+        copyTableToClipboard("avgTable")
+    );
+    UI.copyLapsBtn.addEventListener("click", () =>
+        copyTableToClipboard("lapSummaryTable")
+    );
+    UI.copySelBtn.addEventListener("click", () =>
+        copyDataArray(APP.currentSelection)
+    );
+    UI.copyExplorerBtn.addEventListener("click", () =>
+        copyTableToClipboard("datatable")
     );
 
     document.querySelectorAll('button[data-bs-toggle="pill"]').forEach((el) => {
@@ -122,19 +141,17 @@ function switchFile(fileName) {
     APP.activeFile = fileName;
     const data = APP.files[fileName];
     APP.records = data.records || [];
+    APP.currentSelection = [];
 
-    // Reset Charts & View
     APP.charts.forEach((u) => u.destroy());
     APP.charts = [];
     UI.chartsContainer.innerHTML = "";
     UI.selectionTableContainer.classList.add("d-none");
     UI.statsContainer.classList.add("d-none");
 
-    // Reset Placeholder (Ensure it's visible before we check data)
-    UI.chartsPlaceholder.classList.add("d-flex");
     UI.chartsPlaceholder.classList.remove("d-none");
+    UI.chartsPlaceholder.classList.add("d-flex");
 
-    // Render Views
     renderMap(data.records);
     renderLaps(data.laps);
     renderCharts(data.records);
@@ -144,7 +161,7 @@ function switchFile(fileName) {
     }
 }
 
-// --- MAP LOGIC ---
+// --- MAP ---
 function renderMap(records) {
     APP.gpsData = [];
     const latLongs = [];
@@ -205,11 +222,10 @@ function syncMapCursor(idx) {
     }
 }
 
-// --- CHARTS LOGIC ---
+// --- CHARTS ---
 function renderCharts(records) {
     if (!records || records.length === 0) return;
 
-    // FIX: Explicitly remove d-flex so it hides correctly
     UI.chartsPlaceholder.classList.remove("d-flex");
     UI.chartsPlaceholder.classList.add("d-none");
 
@@ -290,10 +306,10 @@ function renderCharts(records) {
 }
 
 function updateSelectionStats(u) {
-    // If selection cleared
     if (u.select.width === 0) {
         UI.statsContainer.classList.add("d-none");
         UI.selectionTableContainer.classList.add("d-none");
+        APP.currentSelection = [];
         return;
     }
 
@@ -306,51 +322,155 @@ function updateSelectionStats(u) {
     });
 
     if (subset.length === 0) return;
+    APP.currentSelection = subset;
 
-    // 1. Render Selection Averages (Left Column)
     renderAvgTable(subset);
-
-    // 2. Render Selection Records (Bottom)
     renderSelectionTable(subset);
 }
 
+// Renders a single row summarizing the selection, matching Lap table columns
 function renderAvgTable(subset) {
     UI.statsContainer.classList.remove("d-none");
 
-    const fields = ["speed", "heart_rate", "power", "cadence", "altitude"];
-    const stats = [];
+    // Calculate Aggregates
+    const first = subset[0];
+    const last = subset[subset.length - 1];
+    const duration =
+        (new Date(last.timestamp) - new Date(first.timestamp)) / 1000;
 
-    fields.forEach((f) => {
-        const valid = subset.filter((r) => typeof r[f] === "number");
-        if (valid.length > 0) {
-            const sum = valid.reduce((acc, r) => acc + r[f], 0);
-            const avg = sum / valid.length;
-            stats.push({
-                metric: formatLabel(f),
-                value: avg.toFixed(1),
-            });
-        }
-    });
+    // Distance diff (handle if distance field missing)
+    const dist =
+        last.distance && first.distance ? last.distance - first.distance : 0;
+
+    const avg = (key) => {
+        const valid = subset.filter((r) => typeof r[key] === "number");
+        if (!valid.length) return null;
+        return valid.reduce((a, b) => a + b[key], 0) / valid.length;
+    };
+
+    const rowData = [
+        {
+            index: "AVG",
+            total_elapsed_time: duration,
+            total_distance: dist,
+            avg_heart_rate: avg("heart_rate"),
+            avg_speed: avg("speed"),
+            avg_power: avg("power"),
+            avg_cadence: avg("cadence"),
+        },
+    ];
 
     if ($.fn.DataTable.isDataTable("#avgTable")) {
         $("#avgTable").DataTable().destroy();
     }
 
+    // Unified Columns config shared with renderLaps logic ideally
+    const columns = [
+        { title: "#", data: "index", width: "10%" },
+        {
+            title: "Time",
+            data: "total_elapsed_time",
+            render: (d) => formatDuration(d),
+        },
+        {
+            title: "Dist",
+            data: "total_distance",
+            render: (d) => (d || 0).toFixed(2),
+        },
+        {
+            title: "Avg HR",
+            data: "avg_heart_rate",
+            render: (d) => (d ? Math.round(d) : "-"),
+        },
+        {
+            title: "Avg Spd",
+            data: "avg_speed",
+            render: (d) => (d || 0).toFixed(1),
+        },
+        {
+            title: "Avg Pwr",
+            data: "avg_power",
+            render: (d) => (d ? Math.round(d) : "-"),
+        },
+        {
+            title: "Avg Cad",
+            data: "avg_cadence",
+            render: (d) => (d ? Math.round(d) : "-"),
+        },
+    ];
+
     $("#avgTable").DataTable({
-        data: stats,
-        columns: [
-            {
-                data: "metric",
-                title: "METRIC",
-                className: "text-uppercase text-muted fw-bold small",
-            },
-            { data: "value", title: "AVG", className: "fw-bold text-end" },
-        ],
+        data: rowData,
+        columns: columns,
         paging: false,
         searching: false,
         info: false,
         ordering: false,
-        dom: "t",
+        dom: "t", // Just the table
+    });
+}
+
+function renderLaps(laps) {
+    const table = $("#lapSummaryTable");
+    if ($.fn.DataTable.isDataTable("#lapSummaryTable")) {
+        table.DataTable().destroy();
+    }
+    document.getElementById("lapSummaryTable").innerHTML = "";
+
+    if (!laps || laps.length === 0) {
+        UI.lapsContainer.classList.add("d-none");
+        return;
+    }
+    UI.lapsContainer.classList.remove("d-none");
+
+    const columns = [
+        {
+            title: "#",
+            data: null,
+            width: "10%",
+            render: (d, t, r, m) => m.row + 1,
+        },
+        {
+            title: "Time",
+            data: "total_elapsed_time",
+            render: (d) => formatDuration(d),
+        },
+        {
+            title: "Dist",
+            data: "total_distance",
+            render: (d) => (d || 0).toFixed(2),
+        },
+        {
+            title: "Avg HR",
+            data: "avg_heart_rate",
+            render: (d) => (d ? Math.round(d) : "-"),
+        },
+        {
+            title: "Avg Spd",
+            data: "avg_speed",
+            render: (d) => (d || 0).toFixed(1),
+        },
+        {
+            title: "Avg Pwr",
+            data: "avg_power",
+            render: (d) => (d ? Math.round(d) : "-"),
+        },
+        {
+            title: "Avg Cad",
+            data: "avg_cadence",
+            render: (d) => (d ? Math.round(d) : "-"),
+        },
+    ];
+
+    $("#lapSummaryTable").DataTable({
+        data: laps,
+        columns: columns,
+        paging: false,
+        searching: false,
+        info: false,
+        ordering: false,
+        scrollY: "250px",
+        scrollCollapse: true,
     });
 }
 
@@ -390,60 +510,15 @@ function renderSelectionTable(data) {
     $("#selectionTable").DataTable({
         data: data,
         columns: columns,
-        pageLength: 5, // Short length to keep it compact
-        lengthMenu: [5, 10, 25],
+        pageLength: 5,
+        lengthMenu: [5, 10, 25, 100],
         ordering: false,
         searching: false,
         dom: "<'row'<'col-12'tr>>" + "<'row mt-2 small'<'col-6'i><'col-6'p>>",
     });
 }
 
-// --- TABLES LOGIC ---
-function renderLaps(laps) {
-    const table = $("#lapSummaryTable");
-    if ($.fn.DataTable.isDataTable("#lapSummaryTable")) {
-        table.DataTable().destroy();
-    }
-    document.getElementById("lapSummaryTable").innerHTML = "";
-
-    if (!laps || laps.length === 0) {
-        UI.lapsContainer.classList.add("d-none");
-        return;
-    }
-    UI.lapsContainer.classList.remove("d-none");
-
-    const columns = [
-        { title: "#", data: null, render: (d, t, r, m) => m.row + 1 },
-        {
-            title: "Time",
-            data: "total_elapsed_time",
-            render: (d) => formatDuration(d),
-        },
-        {
-            title: "Dist",
-            data: "total_distance",
-            render: (d) => (d || 0).toFixed(2),
-        },
-        {
-            title: "HR",
-            data: "avg_heart_rate",
-            render: (d) => (d ? Math.round(d) : "-"),
-        },
-        { title: "Spd", data: "avg_speed", render: (d) => (d || 0).toFixed(1) },
-    ];
-
-    $("#lapSummaryTable").DataTable({
-        data: laps,
-        columns: columns,
-        paging: false,
-        searching: false,
-        info: false,
-        ordering: false,
-        scrollY: "250px",
-        scrollCollapse: true,
-    });
-}
-
+// --- EXPLORER ---
 function renderExplorer() {
     const viewType = document.querySelector(
         'input[name="dataView"]:checked'
@@ -491,10 +566,10 @@ function renderExplorer() {
         data: k,
         defaultContent: "-",
         render: function (d) {
-            if (typeof d === "object" && d !== null) return "[obj]";
-            if (typeof d === "string" && d.includes("T") && d.length > 18)
-                return d.split("T")[1].replace("Z", "");
             if (typeof d === "number") return Math.round(d * 100) / 100;
+            if (typeof d === "string" && d.length > 10 && d.includes("T"))
+                return d.split("T")[1].replace("Z", "");
+            if (typeof d === "object" && d !== null) return "{...}";
             return d;
         },
     }));
@@ -502,9 +577,11 @@ function renderExplorer() {
     $("#datatable").DataTable({
         data: dataset,
         columns: columns,
-        pageLength: 10,
-        lengthMenu: [10, 25, 50],
+        pageLength: 15,
+        lengthMenu: [15, 50, 100],
         scrollX: true,
+        deferRender: true,
+        orderClasses: false,
         autoWidth: false,
         dom:
             "<'row mb-2'<'col-6'l><'col-6'f>>" +
@@ -513,7 +590,58 @@ function renderExplorer() {
     });
 }
 
-// --- Utilities ---
+// --- UTILS ---
+async function copyTableToClipboard(tableId) {
+    const table = document.getElementById(tableId);
+    if (!table) return;
+
+    let csv = [];
+    // Get headers
+    const thead = table.querySelector("thead");
+    if (thead) {
+        const headers = [];
+        thead
+            .querySelectorAll("th")
+            .forEach((th) => headers.push(th.innerText));
+        csv.push(headers.join("\t"));
+    }
+
+    // Get body rows
+    const rows = table.querySelectorAll("tbody tr");
+    rows.forEach((row) => {
+        const cols = row.querySelectorAll("td");
+        if (cols.length === 0) return; // skip empty/loading
+        const rowData = [];
+        cols.forEach((col) => rowData.push(col.innerText));
+        csv.push(rowData.join("\t"));
+    });
+
+    await navigator.clipboard.writeText(csv.join("\n"));
+
+    // Visual feedback
+    const btn =
+        document.querySelector(
+            `button[id*="${tableId.replace("Table", "").toLowerCase()}"]`
+        ) || document.getElementById("copyExplorerBtn");
+
+    if (btn) {
+        const original = btn.innerHTML;
+        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="#198754" class="bi bi-check-lg" viewBox="0 0 16 16"><path d="M12.736 3.97a.733.733 0 0 1 1.047 0c.286.289.29.756.01 1.05L7.88 12.01a.733.733 0 0 1-1.065.02L3.217 8.384a.757.757 0 0 1 0-1.06.733.733 0 0 1 1.047 0l3.052 3.093 5.4-6.425a.247.247 0 0 1 .02-.022Z"/></svg>`;
+        setTimeout(() => (btn.innerHTML = original), 1500);
+    }
+}
+
+async function copyDataArray(arr) {
+    if (!arr || !arr.length) return;
+    const csv = toCSV(arr, "\t");
+    await navigator.clipboard.writeText(csv);
+
+    const btn = document.getElementById("copySelBtn");
+    const original = btn.innerHTML;
+    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="#198754" class="bi bi-check-lg" viewBox="0 0 16 16"><path d="M12.736 3.97a.733.733 0 0 1 1.047 0c.286.289.29.756.01 1.05L7.88 12.01a.733.733 0 0 1-1.065.02L3.217 8.384a.757.757 0 0 1 0-1.06.733.733 0 0 1 1.047 0l3.052 3.093 5.4-6.425a.247.247 0 0 1 .02-.022Z"/></svg>`;
+    setTimeout(() => (btn.innerHTML = original), 1500);
+}
+
 async function downloadAllFiles() {
     const zip = new JSZip();
     for (const [name, data] of Object.entries(APP.files)) {
@@ -526,15 +654,15 @@ async function downloadAllFiles() {
     saveAs(content, "fit_export.zip");
 }
 
-function toCSV(arr) {
+function toCSV(arr, delimiter = ",") {
     if (!arr.length) return "";
     const headers = Object.keys(arr[0]);
     const rows = arr.map((obj) =>
         headers
             .map((h) => `"${String(obj[h] ?? "").replace(/"/g, '""')}"`)
-            .join(",")
+            .join(delimiter)
     );
-    return [headers.join(","), ...rows].join("\n");
+    return [headers.join(delimiter), ...rows].join("\n");
 }
 
 function formatLabel(str) {

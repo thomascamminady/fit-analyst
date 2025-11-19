@@ -47,7 +47,6 @@
                         FIT<span class="text-primary">Analyst</span>
                     </a>
 
-                    <!-- Main Navigation Tabs -->
                     <ul class="nav nav-pills" id="mainTab" role="tablist">
                         <li class="nav-item" role="presentation">
                             <button
@@ -75,7 +74,6 @@
                 </div>
 
                 <div class="d-flex align-items-center gap-3">
-                    <!-- File Selector -->
                     <div
                         id="fileSelectorWrapper"
                         class="d-none align-items-center animate-fade-in"
@@ -87,7 +85,6 @@
                         ></select>
                     </div>
 
-                    <!-- Upload Button -->
                     <div class="position-relative">
                         <input
                             type="file"
@@ -108,7 +105,7 @@
                         class="btn btn-light btn-sm rounded-circle border-0"
                         id="btnDownload"
                         disabled
-                        title="Download CSV"
+                        title="Download All as ZIP"
                     >
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -141,7 +138,7 @@
                 >
                     <div class="row g-0">
                         <!-- Left Col: Map & Data -->
-                        <div class="col-xl-4 col-lg-5 pe-lg-4">
+                        <div class="col-xl-5 col-lg-5 pe-lg-4">
                             <!-- Map -->
                             <div class="mb-4 d-none" id="mapContainer">
                                 <h6
@@ -152,35 +149,83 @@
                                 <div id="map" class="rounded-3 border"></div>
                             </div>
 
-                            <!-- Selection Stats (Averages Table) -->
+                            <!-- Selection Stats (Single Row Table) -->
                             <div id="selectionStats" class="mb-4 d-none">
-                                <h6
-                                    class="text-uppercase text-muted small fw-bold mb-2"
+                                <div
+                                    class="d-flex justify-content-between align-items-center mb-2"
                                 >
-                                    Selection Averages
-                                </h6>
-                                <div class="bg-white border rounded p-2">
-                                    <table
-                                        class="table table-sm table-borderless w-100 mb-0"
-                                        id="avgTable"
+                                    <h6
+                                        class="text-uppercase text-muted small fw-bold mb-0"
                                     >
-                                        <!-- Filled by JS -->
-                                    </table>
+                                        Selection Summary
+                                    </h6>
+                                    <button
+                                        class="btn btn-link p-0 text-muted"
+                                        id="copyAvgBtn"
+                                        title="Copy Data"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            width="14"
+                                            height="14"
+                                            fill="currentColor"
+                                            class="bi bi-clipboard"
+                                            viewBox="0 0 16 16"
+                                        >
+                                            <path
+                                                d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"
+                                            />
+                                            <path
+                                                d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="bg-white border rounded p-0">
+                                    <table
+                                        class="table table-sm w-100 mb-0"
+                                        id="avgTable"
+                                    ></table>
                                 </div>
                             </div>
 
                             <!-- Laps -->
                             <div class="mb-4 d-none" id="lapsContainer">
-                                <h6
-                                    class="text-uppercase text-muted small fw-bold mb-2"
-                                >
-                                    Lap Splits
-                                </h6>
                                 <div
-                                    class="table-responsive bg-white border rounded p-2"
+                                    class="d-flex justify-content-between align-items-center mb-2"
+                                >
+                                    <h6
+                                        class="text-uppercase text-muted small fw-bold mb-0"
+                                    >
+                                        Lap Splits
+                                    </h6>
+                                    <button
+                                        class="btn btn-link p-0 text-muted"
+                                        id="copyLapsBtn"
+                                        title="Copy Data"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            width="14"
+                                            height="14"
+                                            fill="currentColor"
+                                            class="bi bi-clipboard"
+                                            viewBox="0 0 16 16"
+                                        >
+                                            <path
+                                                d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"
+                                            />
+                                            <path
+                                                d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div
+                                    class="table-responsive bg-white border rounded p-0"
                                 >
                                     <table
-                                        class="table table-sm w-100"
+                                        class="table table-sm w-100 mb-0"
                                         id="lapSummaryTable"
                                     ></table>
                                 </div>
@@ -188,8 +233,8 @@
                         </div>
 
                         <!-- Right Col: Charts & Details -->
-                        <div class="col-xl-8 col-lg-7">
-                            <!-- Placeholder (d-flex class added/removed by JS now to prevent !important conflicts) -->
+                        <div class="col-xl-7 col-lg-7">
+                            <!-- Placeholder -->
                             <div
                                 id="charts-placeholder"
                                 class="d-flex flex-column justify-content-center align-items-center text-muted"
@@ -229,16 +274,41 @@
                                 <div
                                     class="d-flex align-items-center justify-content-between mb-2"
                                 >
-                                    <h6
-                                        class="text-uppercase text-muted small fw-bold mb-0"
+                                    <div
+                                        class="d-flex align-items-center gap-2"
                                     >
-                                        Selected Range Records
-                                    </h6>
-                                    <span
-                                        class="badge bg-light text-dark border"
-                                        id="selectionCountBadge"
-                                        >0 records</span
+                                        <h6
+                                            class="text-uppercase text-muted small fw-bold mb-0"
+                                        >
+                                            Selected Range Records
+                                        </h6>
+                                        <span
+                                            class="badge bg-light text-dark border"
+                                            id="selectionCountBadge"
+                                            >0 records</span
+                                        >
+                                    </div>
+                                    <button
+                                        class="btn btn-link p-0 text-muted"
+                                        id="copySelBtn"
+                                        title="Copy Data"
                                     >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            width="14"
+                                            height="14"
+                                            fill="currentColor"
+                                            class="bi bi-clipboard"
+                                            viewBox="0 0 16 16"
+                                        >
+                                            <path
+                                                d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"
+                                            />
+                                            <path
+                                                d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"
+                                            />
+                                        </svg>
+                                    </button>
                                 </div>
                                 <div class="bg-white border rounded p-3">
                                     <table
@@ -255,65 +325,89 @@
                 <!-- VIEW: EXPLORER -->
                 <div class="tab-pane fade" id="explorer" role="tabpanel">
                     <div
-                        class="d-flex align-items-center gap-3 mb-3 pb-3 border-bottom"
+                        class="d-flex align-items-center justify-content-between mb-3 pb-3 border-bottom"
                     >
-                        <span class="text-uppercase text-muted small fw-bold"
-                            >Data View:</span
-                        >
-                        <div class="btn-group" role="group">
-                            <input
-                                type="radio"
-                                class="btn-check"
-                                name="dataView"
-                                id="viewRecords"
-                                value="records"
-                                checked
-                            />
-                            <label
-                                class="btn btn-outline-secondary btn-sm rounded-start-pill"
-                                for="viewRecords"
-                                >Records</label
+                        <div class="d-flex align-items-center gap-3">
+                            <span
+                                class="text-uppercase text-muted small fw-bold"
+                                >Data View:</span
                             >
+                            <div class="btn-group" role="group">
+                                <input
+                                    type="radio"
+                                    class="btn-check"
+                                    name="dataView"
+                                    id="viewRecords"
+                                    value="records"
+                                    checked
+                                />
+                                <label
+                                    class="btn btn-outline-secondary btn-sm rounded-start-pill"
+                                    for="viewRecords"
+                                    >Records</label
+                                >
 
-                            <input
-                                type="radio"
-                                class="btn-check"
-                                name="dataView"
-                                id="viewLaps"
-                                value="laps"
-                            />
-                            <label
-                                class="btn btn-outline-secondary btn-sm"
-                                for="viewLaps"
-                                >Laps</label
-                            >
+                                <input
+                                    type="radio"
+                                    class="btn-check"
+                                    name="dataView"
+                                    id="viewLaps"
+                                    value="laps"
+                                />
+                                <label
+                                    class="btn btn-outline-secondary btn-sm"
+                                    for="viewLaps"
+                                    >Laps</label
+                                >
 
-                            <input
-                                type="radio"
-                                class="btn-check"
-                                name="dataView"
-                                id="viewSessions"
-                                value="sessions"
-                            />
-                            <label
-                                class="btn btn-outline-secondary btn-sm"
-                                for="viewSessions"
-                                >Sessions</label
-                            >
+                                <input
+                                    type="radio"
+                                    class="btn-check"
+                                    name="dataView"
+                                    id="viewSessions"
+                                    value="sessions"
+                                />
+                                <label
+                                    class="btn btn-outline-secondary btn-sm"
+                                    for="viewSessions"
+                                    >Sessions</label
+                                >
 
-                            <input
-                                type="radio"
-                                class="btn-check"
-                                name="dataView"
-                                id="viewRaw"
-                                value="raw"
-                            />
-                            <label
-                                class="btn btn-outline-secondary btn-sm rounded-end-pill"
-                                for="viewRaw"
-                                >JSON</label
-                            >
+                                <input
+                                    type="radio"
+                                    class="btn-check"
+                                    name="dataView"
+                                    id="viewRaw"
+                                    value="raw"
+                                />
+                                <label
+                                    class="btn btn-outline-secondary btn-sm rounded-end-pill"
+                                    for="viewRaw"
+                                    >JSON</label
+                                >
+                            </div>
                         </div>
+                        <button
+                            class="btn btn-outline-secondary btn-sm"
+                            id="copyExplorerBtn"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                fill="currentColor"
+                                class="bi bi-clipboard me-1"
+                                viewBox="0 0 16 16"
+                            >
+                                <path
+                                    d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"
+                                />
+                                <path
+                                    d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"
+                                />
+                            </svg>
+                            Copy Table
+                        </button>
                     </div>
 
                     <div class="bg-white">
