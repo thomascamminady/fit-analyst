@@ -4,26 +4,38 @@ export async function parseFitData(file) {
     const buffer = await file.arrayBuffer();
     const fitData = await runParser(buffer);
 
-    const records = fitData.records || [];
-
-    // 1. Extract GPS Trace & Bounds once
+    const rawRecords = fitData.records || [];
+    const records = [];
     const gps = [];
+
+    // Track Bounds
     let minLat = 90,
         maxLat = -90,
         minLon = 180,
         maxLon = -180;
+    let hasGPS = false;
+    let startTime = Infinity;
+    let endTime = -Infinity;
 
-    records.forEach((r, index) => {
-        // Check for valid coordinates
+    rawRecords.forEach((r, i) => {
+        // 1. Normalize Timestamp to seconds (float)
+        // This ensures perfect sync between uPlot (charts) and our logic
+        const ts =
+            r.timestamp instanceof Date
+                ? r.timestamp.getTime() / 1000
+                : new Date(r.timestamp).getTime() / 1000;
+
+        // 2. Standardize Record
+        const record = { ...r, ts: ts, i: i };
+        records.push(record);
+
+        if (ts < startTime) startTime = ts;
+        if (ts > endTime) endTime = ts;
+
+        // 3. Extract GPS
         if (isValid(r.position_lat) && isValid(r.position_long)) {
-            // Normalize timestamp to seconds
-            const ts =
-                r.timestamp instanceof Date
-                    ? r.timestamp.getTime() / 1000
-                    : new Date(r.timestamp).getTime() / 1000;
-
             gps.push({
-                i: index,
+                i: i,
                 lat: r.position_lat,
                 lon: r.position_long,
                 ts: ts,
@@ -33,56 +45,48 @@ export async function parseFitData(file) {
             if (r.position_lat > maxLat) maxLat = r.position_lat;
             if (r.position_long < minLon) minLon = r.position_long;
             if (r.position_long > maxLon) maxLon = r.position_long;
+            hasGPS = true;
         }
     });
 
-    // 2. Dynamically detect numeric fields for charts
-    // We exclude standard fields that shouldn't be charted as Y-values
-    const ignoreFields = new Set([
+    // 4. Detect Chartable Fields
+    const ignore = new Set([
         "timestamp",
+        "ts",
+        "i",
         "position_lat",
         "position_long",
         "timer_time",
         "elapsed_time",
         "distance",
         "temperature",
-        "altitude",
     ]);
-
-    // Explicitly include Altitude if you want it charted, otherwise remove from ignore list
-    // Usually people want Altitude charted, so let's allow it:
-    ignoreFields.delete("altitude");
-
-    const fieldSet = new Set();
+    const fields = new Set();
     records.forEach((r) => {
         Object.keys(r).forEach((k) => {
-            if (!ignoreFields.has(k) && typeof r[k] === "number") {
-                fieldSet.add(k);
-            }
+            if (!ignore.has(k) && typeof r[k] === "number") fields.add(k);
         });
     });
 
-    // Sort fields alphabetically for consistent UI
-    const sortedFields = Array.from(fieldSet).sort();
-
     return {
-        raw: fitData,
         records: records,
+        gps: gps,
         laps: fitData.laps || [],
         sessions: fitData.sessions || [],
-        gps: gps,
-        bounds: gps.length
+        bounds: hasGPS
             ? [
                   [minLat, minLon],
                   [maxLat, maxLon],
               ]
             : null,
-        fields: sortedFields,
+        fields: Array.from(fields).sort(),
+        startTime: startTime,
+        endTime: endTime,
     };
 }
 
-function isValid(num) {
-    return typeof num === "number" && !isNaN(num);
+function isValid(n) {
+    return typeof n === "number" && !isNaN(n);
 }
 
 function runParser(buffer) {
@@ -95,9 +99,8 @@ function runParser(buffer) {
             elapsedRecordField: true,
             mode: "both",
         });
-        parser.parse(buffer, (err, data) => {
-            if (err) reject(err);
-            else resolve(data);
-        });
+        parser.parse(buffer, (err, data) =>
+            err ? reject(err) : resolve(data)
+        );
     });
 }

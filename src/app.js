@@ -1,41 +1,26 @@
 import { parseFitData } from "./parse.js";
+import { MapManager } from "./map.js";
 import { ChartManager } from "./charts.js";
 
 // --- State ---
 const APP = {
     data: null,
+    map: new MapManager("mapContainer"),
     charts: new ChartManager("charts-container", "charts-placeholder"),
-    map: null,
-    layers: { base: null, highlight: null, marker: null },
 };
 
 // --- Init ---
 function init() {
-    // Map Setup
-    APP.map = L.map("map", { zoomControl: false }).setView([0, 0], 2);
-    L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-        {
-            attribution: "&copy; OpenStreetMap",
-        }
-    ).addTo(APP.map);
-    L.control.zoom({ position: "bottomright" }).addTo(APP.map);
-
-    // Listeners
     document
         .getElementById("fileInput")
         .addEventListener("change", handleUpload);
     window.addEventListener("resize", () => {
         APP.charts.resize();
-        APP.map.invalidateSize();
+        APP.map.resize();
     });
 
-    // Tab Refresh fixes
     document.querySelectorAll('button[data-bs-toggle="pill"]').forEach((el) => {
-        el.addEventListener("shown.bs.tab", () => {
-            APP.map.invalidateSize();
-            if (APP.data && APP.data.bounds) APP.map.fitBounds(APP.data.bounds);
-        });
+        el.addEventListener("shown.bs.tab", () => APP.map.resize());
     });
 
     document
@@ -45,7 +30,6 @@ function init() {
         });
 }
 
-// --- Controller ---
 async function handleUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -55,23 +39,26 @@ async function handleUpload(e) {
     try {
         APP.data = await parseFitData(file);
 
-        // Update File UI
         document
             .getElementById("fileSelectorWrapper")
             .classList.replace("d-none", "d-flex");
-        const s = document.getElementById("fileSelect");
-        s.innerHTML = "";
-        s.add(new Option(file.name));
+        document.getElementById(
+            "fileSelect"
+        ).innerHTML = `<option>${file.name}</option>`;
 
-        resetState();
-        renderMap();
-        renderTables();
+        resetViews();
 
-        // Render Charts with Callbacks
+        // 1. Load Map
+        APP.map.load(APP.data.gps, APP.data.bounds);
+
+        // 2. Set Initial State (Reset = Select All)
+        updateSelectionState(null, null);
+
+        // 3. Render Charts
         APP.charts.render(
             APP.data,
-            (min, max) => handleChartSelection(min, max), // On Select
-            (idx) => syncMarker(idx) // On Hover
+            (min, max) => updateSelectionState(min, max),
+            (idx) => APP.map.setMarker(idx)
         );
     } catch (err) {
         console.error(err);
@@ -81,99 +68,40 @@ async function handleUpload(e) {
     }
 }
 
-function handleChartSelection(min, max) {
-    // Reset State (Double Click clears selection)
-    if (min === null || max === null) {
-        document.getElementById("selectionStats").classList.add("d-none");
+// --- Core Selection Logic ---
+function updateSelectionState(minTs, maxTs) {
+    if (!APP.data) return;
+
+    const isReset = minTs === null || maxTs === null;
+    let subset;
+
+    if (isReset) {
+        // Select EVERYTHING
+        subset = APP.data.records;
+    } else {
+        // Filter Subset
+        subset = APP.data.records.filter((r) => r.ts >= minTs && r.ts <= maxTs);
+    }
+
+    // 1. Summary Table (Shows either Activity Summary or Selection Summary)
+    renderAvgTable(subset, isReset);
+
+    // 2. Map (Highlights or Reset)
+    APP.map.updateHighlight(subset, isReset);
+
+    // 3. Detailed Records (Only show if specifically selecting a range)
+    if (isReset) {
         document
             .getElementById("selectionTableContainer")
             .classList.add("d-none");
-
-        // Clear Map Highlight & Zoom to Full Bounds
-        if (APP.layers.highlight) APP.layers.highlight.setLatLngs([]);
-        if (APP.data.bounds)
-            APP.map.fitBounds(APP.data.bounds, { padding: [30, 30] });
-        return;
-    }
-
-    // Filter Data
-    const subset = APP.data.records.filter((r) => {
-        const t =
-            r.timestamp instanceof Date
-                ? r.timestamp.getTime() / 1000
-                : new Date(r.timestamp).getTime() / 1000;
-        return t >= min && t <= max;
-    });
-
-    if (subset.length) {
-        renderAvgTable(subset);
+    } else {
         renderRecordTable(subset, true);
-        updateMapSelection(min, max);
     }
 }
 
-// --- Map Logic ---
-function renderMap() {
-    const { gps, bounds } = APP.data;
-    const container = document.getElementById("mapContainer");
-
-    if (!gps || !gps.length) {
-        container.classList.add("d-none");
-        return;
-    }
-    container.classList.remove("d-none");
-
-    // Reset Layers
-    if (APP.layers.base) APP.map.removeLayer(APP.layers.base);
-    if (APP.layers.highlight) APP.map.removeLayer(APP.layers.highlight);
-    if (APP.layers.marker) APP.map.removeLayer(APP.layers.marker);
-
-    // Full Trace (Blue)
-    APP.layers.base = L.polyline(
-        gps.map((p) => [p.lat, p.lon]),
-        { color: "#2563eb", weight: 3, opacity: 0.6 }
-    ).addTo(APP.map);
-
-    // Selection Trace (Red)
-    APP.layers.highlight = L.polyline([], {
-        color: "#dc2626",
-        weight: 4,
-        opacity: 1,
-    }).addTo(APP.map);
-
-    // Marker
-    APP.layers.marker = L.circleMarker([0, 0], {
-        radius: 6,
-        color: "#2563eb",
-        fillColor: "#fff",
-        fillOpacity: 1,
-        opacity: 0,
-    }).addTo(APP.map);
-
-    setTimeout(() => {
-        APP.map.invalidateSize();
-        APP.map.fitBounds(bounds, { padding: [30, 30] });
-    }, 100);
-}
-
-function updateMapSelection(minTs, maxTs) {
-    const segment = APP.data.gps.filter((p) => p.ts >= minTs && p.ts <= maxTs);
-    if (segment.length > 0) {
-        const latlngs = segment.map((p) => [p.lat, p.lon]);
-        APP.layers.highlight.setLatLngs(latlngs);
-        APP.map.fitBounds(L.latLngBounds(latlngs), { padding: [50, 50] });
-    }
-}
-
-function syncMarker(idx) {
-    const p = APP.data.gps.find((p) => p.i === idx);
-    if (p) APP.layers.marker.setLatLng([p.lat, p.lon]).setStyle({ opacity: 1 });
-}
-
-// --- Table Logic ---
+// --- Tables ---
 function renderTables() {
     renderLaps(APP.data.laps);
-    renderRecordTable(APP.data.records, false);
 }
 
 function renderRecordTable(data, isSelection) {
@@ -223,21 +151,24 @@ function renderRecordTable(data, isSelection) {
     $(tableId).DataTable({
         data: data,
         columns: columns,
-        pageLength: isSelection ? 5 : 15,
+        pageLength: 5,
         lengthMenu: [5, 15, 50],
-        searching: !isSelection,
+        searching: false,
         ordering: false,
         scrollX: true,
-        dom: isSelection
-            ? "<'row'<'col-12'tr>>p"
-            : "<'row mb-2'<'col-6'l><'col-6'f>>rtip",
+        dom: "<'row'<'col-12'tr>>p",
     });
 }
 
-// UPDATED: Uses DataTables to allow scrolling
-function renderAvgTable(subset) {
+function renderAvgTable(subset, isFullRange) {
     const container = document.getElementById("selectionStats");
     container.classList.remove("d-none");
+
+    const titleEl = container.querySelector("h6");
+    if (titleEl)
+        titleEl.textContent = isFullRange
+            ? "Activity Summary"
+            : "Selection Summary";
 
     const tableId = "#avgTable";
     if ($.fn.DataTable.isDataTable(tableId)) {
@@ -245,64 +176,52 @@ function renderAvgTable(subset) {
         document.querySelector(tableId).innerHTML = "";
     }
 
-    // 1. Calculate Averages
+    if (!subset.length) return;
+
     const first = subset[0];
     const last = subset[subset.length - 1];
-
-    const t1 =
-        first.timestamp instanceof Date
-            ? first.timestamp
-            : new Date(first.timestamp);
-    const t2 =
-        last.timestamp instanceof Date
-            ? last.timestamp
-            : new Date(last.timestamp);
-    const duration = (t2 - t1) / 1000;
+    const duration = last.ts - first.ts;
     const dist = (last.distance || 0) - (first.distance || 0);
 
-    const rowData = {
-        time: duration,
-        dist: dist,
-    };
-
-    // Calculate dynamic averages
+    const rowData = { duration, dist };
     APP.data.fields.forEach((k) => {
         const valid = subset.filter((r) => typeof r[k] === "number");
-        const avg = valid.length
+        rowData[k] = valid.length
             ? valid.reduce((a, b) => a + b[k], 0) / valid.length
             : 0;
-        rowData[k] = avg;
     });
 
-    // 2. Define Columns
-    const columns = [
-        { title: "Duration", data: "time", render: (d) => formatDuration(d) },
+    const cols = [
+        {
+            title: "Duration",
+            data: "duration",
+            render: (d) => formatDuration(d),
+        },
         { title: "Distance", data: "dist", render: (d) => d.toFixed(2) },
     ];
-
     APP.data.fields.forEach((k) => {
-        columns.push({
+        cols.push({
             title: "Avg " + formatLabel(k),
             data: k,
             render: (d) => d.toFixed(1),
         });
     });
 
-    // 3. Render DataTable
     $(tableId).DataTable({
-        data: [rowData], // Single row array
-        columns: columns,
-        dom: "t", // Only show table (no search, no pagination)
-        scrollX: true, // Enable horizontal scrolling
-        ordering: false,
+        data: [rowData],
+        columns: cols,
+        dom: "t",
         paging: false,
-        info: false,
+        ordering: false,
+        scrollX: true,
     });
+
+    renderLaps(APP.data.laps);
 }
 
 function renderLaps(laps) {
     const container = document.getElementById("lapsContainer");
-    if (!laps || !laps.length) {
+    if (!laps.length) {
         container.classList.add("d-none");
         return;
     }
@@ -340,16 +259,17 @@ function renderLaps(laps) {
         columns: cols,
         paging: false,
         searching: false,
-        scrollX: true, // Added scrollX here too just in case
+        scrollX: true,
         scrollY: "200px",
     });
 }
 
 function renderExplorer() {
-    // Explorer logic if needed
+    const type = document.querySelector('input[name="dataView"]:checked').value;
+    if (type === "records") renderRecordTable(APP.data.records, false);
 }
 
-function resetState() {
+function resetViews() {
     APP.charts.clear();
     document.getElementById("selectionTableContainer").classList.add("d-none");
     document.getElementById("selectionStats").classList.add("d-none");
