@@ -152,18 +152,20 @@
                                 <div id="map" class="rounded-3 border"></div>
                             </div>
 
-                            <!-- Selection Stats (Dynamic) -->
+                            <!-- Selection Stats (Averages Table) -->
                             <div id="selectionStats" class="mb-4 d-none">
                                 <h6
                                     class="text-uppercase text-muted small fw-bold mb-2"
                                 >
-                                    Selection Avg
+                                    Selection Averages
                                 </h6>
-                                <div
-                                    class="d-flex gap-2 flex-wrap"
-                                    id="stats-grid"
-                                >
-                                    <!-- Populated by JS -->
+                                <div class="bg-white border rounded p-2">
+                                    <table
+                                        class="table table-sm table-borderless w-100 mb-0"
+                                        id="avgTable"
+                                    >
+                                        <!-- Filled by JS -->
+                                    </table>
                                 </div>
                             </div>
 
@@ -174,7 +176,9 @@
                                 >
                                     Lap Splits
                                 </h6>
-                                <div class="table-responsive">
+                                <div
+                                    class="table-responsive bg-white border rounded p-2"
+                                >
                                     <table
                                         class="table table-sm w-100"
                                         id="lapSummaryTable"
@@ -183,17 +187,67 @@
                             </div>
                         </div>
 
-                        <!-- Right Col: Charts -->
+                        <!-- Right Col: Charts & Details -->
                         <div class="col-xl-8 col-lg-7">
+                            <!-- Placeholder (d-flex class added/removed by JS now to prevent !important conflicts) -->
                             <div
                                 id="charts-placeholder"
-                                class="text-center text-muted py-5 mt-5"
+                                class="d-flex flex-column justify-content-center align-items-center text-muted"
+                                style="min-height: 60vh"
                             >
-                                <p class="mb-0 fw-light">
-                                    Upload a FIT file to start analyzing
+                                <div class="mb-3 p-4 rounded-circle bg-light">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="48"
+                                        height="48"
+                                        fill="#adb5bd"
+                                        class="bi bi-bar-chart-line"
+                                        viewBox="0 0 16 16"
+                                    >
+                                        <path
+                                            d="M11 2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v12h.5a.5.5 0 0 1 0 1H.5a.5.5 0 0 1 0-1H1v-3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v3h1V7a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v7h1V2zm1 12h2V2h-2v12zm-3 0V7H7v7h2zm-5 0v-3H2v3h2z"
+                                        />
+                                    </svg>
+                                </div>
+                                <p class="fs-5 fw-light mb-1">
+                                    No Activity Loaded
+                                </p>
+                                <p class="small text-secondary">
+                                    Upload a .FIT file to visualize your
+                                    performance.
                                 </p>
                             </div>
+
+                            <!-- Charts -->
                             <div id="charts-container"></div>
+
+                            <!-- Selection Table (Detailed Records) -->
+                            <div
+                                id="selectionTableContainer"
+                                class="mt-5 d-none animate-fade-in"
+                            >
+                                <div
+                                    class="d-flex align-items-center justify-content-between mb-2"
+                                >
+                                    <h6
+                                        class="text-uppercase text-muted small fw-bold mb-0"
+                                    >
+                                        Selected Range Records
+                                    </h6>
+                                    <span
+                                        class="badge bg-light text-dark border"
+                                        id="selectionCountBadge"
+                                        >0 records</span
+                                    >
+                                </div>
+                                <div class="bg-white border rounded p-3">
+                                    <table
+                                        id="selectionTable"
+                                        class="table table-sm table-hover w-100"
+                                        style="font-size: 0.85rem"
+                                    ></table>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -263,14 +317,12 @@
                     </div>
 
                     <div class="bg-white">
-                        <!-- DataTables Container -->
                         <div id="explorer-table-container">
                             <table
                                 id="datatable"
                                 class="table table-hover w-100"
                             ></table>
                         </div>
-                        <!-- JSON Container -->
                         <div
                             id="explorer-json-container"
                             class="d-none p-3 bg-light rounded border simple-scrollbar"

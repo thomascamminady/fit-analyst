@@ -6,8 +6,8 @@ const APP = {
     activeFile: null,
     map: null,
     polyline: null,
-    positionMarker: null, // The hovering blue dot
-    gpsData: [], // {ts, lat, lon}
+    positionMarker: null,
+    gpsData: [], // {i, lat, lon}
     records: [], // Current full records array
     charts: [],
     syncKey: null,
@@ -24,10 +24,12 @@ const UI = {
     mapContainer: document.getElementById("mapContainer"),
     lapsContainer: document.getElementById("lapsContainer"),
     statsContainer: document.getElementById("selectionStats"),
-    statsGrid: document.getElementById("stats-grid"),
 
     chartsContainer: document.getElementById("charts-container"),
     chartsPlaceholder: document.getElementById("charts-placeholder"),
+
+    selectionTableContainer: document.getElementById("selectionTableContainer"),
+    selectionCountBadge: document.getElementById("selectionCountBadge"),
 
     datatableEl: document.getElementById("datatable"),
     radioInputs: document.querySelectorAll('input[name="dataView"]'),
@@ -35,7 +37,6 @@ const UI = {
 
 // --- Init ---
 function init() {
-    // Init Map
     APP.map = L.map("map", { zoomControl: false }).setView([0, 0], 2);
     L.tileLayer(
         "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
@@ -45,7 +46,6 @@ function init() {
     ).addTo(APP.map);
     L.control.zoom({ position: "bottomright" }).addTo(APP.map);
 
-    // Listeners
     UI.fileInput.addEventListener("change", handleUpload);
     UI.fileSelect.addEventListener("change", (e) => switchFile(e.target.value));
     UI.btnDownload.addEventListener("click", downloadAllFiles);
@@ -53,7 +53,6 @@ function init() {
         radio.addEventListener("change", renderExplorer)
     );
 
-    // Fix map size when tab changes
     document.querySelectorAll('button[data-bs-toggle="pill"]').forEach((el) => {
         el.addEventListener("shown.bs.tab", () => {
             APP.map.invalidateSize();
@@ -124,20 +123,22 @@ function switchFile(fileName) {
     const data = APP.files[fileName];
     APP.records = data.records || [];
 
-    // Clean up
+    // Reset Charts & View
     APP.charts.forEach((u) => u.destroy());
     APP.charts = [];
     UI.chartsContainer.innerHTML = "";
+    UI.selectionTableContainer.classList.add("d-none");
+    UI.statsContainer.classList.add("d-none");
+
+    // Reset Placeholder (Ensure it's visible before we check data)
+    UI.chartsPlaceholder.classList.add("d-flex");
+    UI.chartsPlaceholder.classList.remove("d-none");
 
     // Render Views
     renderMap(data.records);
     renderLaps(data.laps);
     renderCharts(data.records);
 
-    // Reset Stats
-    UI.statsContainer.classList.add("d-none");
-
-    // Update Explorer if active
     if (document.getElementById("explorer").classList.contains("active")) {
         renderExplorer();
     }
@@ -148,10 +149,8 @@ function renderMap(records) {
     APP.gpsData = [];
     const latLongs = [];
 
-    // Pre-process GPS data for fast lookup
     records.forEach((r, i) => {
         if (r.position_lat && r.position_long) {
-            // Store index to sync with charts easily
             APP.gpsData.push({
                 i: i,
                 lat: r.position_lat,
@@ -164,28 +163,24 @@ function renderMap(records) {
     if (latLongs.length > 0) {
         UI.mapContainer.classList.remove("d-none");
 
-        // Remove old layers
         if (APP.polyline) APP.map.removeLayer(APP.polyline);
         if (APP.positionMarker) APP.map.removeLayer(APP.positionMarker);
 
-        // Add Track
         APP.polyline = L.polyline(latLongs, {
             color: "#2563eb",
             weight: 3,
             opacity: 0.8,
         }).addTo(APP.map);
 
-        // Add Sync Marker (hidden initially)
         APP.positionMarker = L.circleMarker([0, 0], {
             radius: 6,
             fillColor: "#fff",
             color: "#2563eb",
             weight: 3,
-            opacity: 0, // Init hidden
-            fillOpacity: 0, // Init hidden
+            opacity: 0,
+            fillOpacity: 0,
         }).addTo(APP.map);
 
-        // Important: fix zoom
         setTimeout(() => {
             APP.map.invalidateSize();
             APP.map.fitBounds(APP.polyline.getBounds(), { padding: [30, 30] });
@@ -195,18 +190,15 @@ function renderMap(records) {
     }
 }
 
-// Syncs cursor from Chart -> Map
 function syncMapCursor(idx) {
     if (!APP.gpsData.length || !APP.positionMarker) return;
 
-    // Find the gps point closest to this record index
     const point =
         APP.gpsData.find((p) => p.i === idx) ||
         APP.gpsData.find((p) => p.i > idx - 5 && p.i < idx + 5);
 
     if (point) {
         APP.positionMarker.setLatLng([point.lat, point.lon]);
-        // FIXED: Use setStyle instead of setOpacity for CircleMarker
         APP.positionMarker.setStyle({ opacity: 1, fillOpacity: 1 });
     } else {
         APP.positionMarker.setStyle({ opacity: 0, fillOpacity: 0 });
@@ -216,7 +208,10 @@ function syncMapCursor(idx) {
 // --- CHARTS LOGIC ---
 function renderCharts(records) {
     if (!records || records.length === 0) return;
-    UI.chartsPlaceholder.style.display = "none";
+
+    // FIX: Explicitly remove d-flex so it hides correctly
+    UI.chartsPlaceholder.classList.remove("d-flex");
+    UI.chartsPlaceholder.classList.add("d-none");
 
     const ignore = [
         "timestamp",
@@ -226,7 +221,6 @@ function renderCharts(records) {
         "distance",
         "timer_time",
     ];
-    // Filter fields that have numeric data
     const keys = Object.keys(records[0]).filter((k) => {
         if (ignore.includes(k)) return false;
         return records.some((r) => typeof r[k] === "number");
@@ -247,7 +241,7 @@ function renderCharts(records) {
             {
                 width: div.clientWidth,
                 height: 160,
-                title: "", // No top title
+                title: "",
                 cursor: {
                     sync: { key: sync.key, setSeries: true },
                     focus: { prox: 30 },
@@ -255,7 +249,7 @@ function renderCharts(records) {
                 },
                 scales: { x: { time: true } },
                 axes: [
-                    {}, // X axis default
+                    {},
                     {
                         label: formatLabel(key),
                         labelSize: 20,
@@ -296,14 +290,16 @@ function renderCharts(records) {
 }
 
 function updateSelectionStats(u) {
+    // If selection cleared
     if (u.select.width === 0) {
+        UI.statsContainer.classList.add("d-none");
+        UI.selectionTableContainer.classList.add("d-none");
         return;
     }
 
     const minX = u.posToVal(u.select.left, "x");
     const maxX = u.posToVal(u.select.left + u.select.width, "x");
 
-    // Filter records in range
     const subset = APP.records.filter((r) => {
         const t = new Date(r.timestamp).getTime() / 1000;
         return t >= minX && t <= maxX;
@@ -311,26 +307,95 @@ function updateSelectionStats(u) {
 
     if (subset.length === 0) return;
 
+    // 1. Render Selection Averages (Left Column)
+    renderAvgTable(subset);
+
+    // 2. Render Selection Records (Bottom)
+    renderSelectionTable(subset);
+}
+
+function renderAvgTable(subset) {
     UI.statsContainer.classList.remove("d-none");
 
-    // Calculate averages for interesting fields
-    const fields = ["speed", "heart_rate", "power", "cadence"];
-    let html = "";
+    const fields = ["speed", "heart_rate", "power", "cadence", "altitude"];
+    const stats = [];
 
     fields.forEach((f) => {
         const valid = subset.filter((r) => typeof r[f] === "number");
         if (valid.length > 0) {
             const sum = valid.reduce((acc, r) => acc + r[f], 0);
             const avg = sum / valid.length;
-            html += `
-                <div class="stat-card">
-                    <div class="stat-label">${formatLabel(f)}</div>
-                    <div class="stat-value">${avg.toFixed(1)}</div>
-                </div>`;
+            stats.push({
+                metric: formatLabel(f),
+                value: avg.toFixed(1),
+            });
         }
     });
 
-    UI.statsGrid.innerHTML = html;
+    if ($.fn.DataTable.isDataTable("#avgTable")) {
+        $("#avgTable").DataTable().destroy();
+    }
+
+    $("#avgTable").DataTable({
+        data: stats,
+        columns: [
+            {
+                data: "metric",
+                title: "METRIC",
+                className: "text-uppercase text-muted fw-bold small",
+            },
+            { data: "value", title: "AVG", className: "fw-bold text-end" },
+        ],
+        paging: false,
+        searching: false,
+        info: false,
+        ordering: false,
+        dom: "t",
+    });
+}
+
+function renderSelectionTable(data) {
+    UI.selectionTableContainer.classList.remove("d-none");
+    UI.selectionCountBadge.textContent = `${data.length} records`;
+
+    if ($.fn.DataTable.isDataTable("#selectionTable")) {
+        $("#selectionTable").DataTable().destroy();
+        document.getElementById("selectionTable").innerHTML = "";
+    }
+
+    const keys = Object.keys(data[0]).filter((k) =>
+        [
+            "timestamp",
+            "distance",
+            "speed",
+            "power",
+            "heart_rate",
+            "cadence",
+            "altitude",
+        ].includes(k)
+    );
+
+    const columns = keys.map((k) => ({
+        title: formatLabel(k),
+        data: k,
+        defaultContent: "-",
+        render: function (d) {
+            if (typeof d === "number") return Math.round(d * 10) / 10;
+            if (typeof d === "string" && d.includes("T"))
+                return d.split("T")[1].replace("Z", "");
+            return d;
+        },
+    }));
+
+    $("#selectionTable").DataTable({
+        data: data,
+        columns: columns,
+        pageLength: 5, // Short length to keep it compact
+        lengthMenu: [5, 10, 25],
+        ordering: false,
+        searching: false,
+        dom: "<'row'<'col-12'tr>>" + "<'row mt-2 small'<'col-6'i><'col-6'p>>",
+    });
 }
 
 // --- TABLES LOGIC ---
@@ -357,23 +422,14 @@ function renderLaps(laps) {
         {
             title: "Dist",
             data: "total_distance",
-            render: (d) => (d || 0).toFixed(2) + " km",
+            render: (d) => (d || 0).toFixed(2),
         },
         {
-            title: "Avg HR",
+            title: "HR",
             data: "avg_heart_rate",
             render: (d) => (d ? Math.round(d) : "-"),
         },
-        {
-            title: "Avg Pwr",
-            data: "avg_power",
-            render: (d) => (d ? Math.round(d) : "-"),
-        },
-        {
-            title: "Speed",
-            data: "avg_speed",
-            render: (d) => (d || 0).toFixed(1),
-        },
+        { title: "Spd", data: "avg_speed", render: (d) => (d || 0).toFixed(1) },
     ];
 
     $("#lapSummaryTable").DataTable({
@@ -383,7 +439,7 @@ function renderLaps(laps) {
         searching: false,
         info: false,
         ordering: false,
-        scrollY: "300px",
+        scrollY: "250px",
         scrollCollapse: true,
     });
 }
@@ -428,7 +484,6 @@ function renderExplorer() {
     }
 
     const keys = Object.keys(dataset[0]);
-    // Limit columns for performance if too many keys
     const visibleKeys = keys.slice(0, 15);
 
     const columns = visibleKeys.map((k) => ({
@@ -498,12 +553,12 @@ function formatDuration(seconds) {
 }
 
 function getChartColor(key) {
-    if (key.includes("heart")) return "#ef4444"; // Red
-    if (key.includes("speed")) return "#3b82f6"; // Blue
-    if (key.includes("power")) return "#f59e0b"; // Amber
-    if (key.includes("cadence")) return "#8b5cf6"; // Purple
-    if (key.includes("alt")) return "#10b981"; // Green
-    return "#6b7280"; // Gray
+    if (key.includes("heart")) return "#ef4444";
+    if (key.includes("speed")) return "#3b82f6";
+    if (key.includes("power")) return "#f59e0b";
+    if (key.includes("cadence")) return "#8b5cf6";
+    if (key.includes("alt")) return "#10b981";
+    return "#6b7280";
 }
 
 window.addEventListener("resize", () => {
