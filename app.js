@@ -1,356 +1,243 @@
-import FitParser from "https://esm.sh/fit-file-parser@1.9.5?bundle";
+import { parseFitData } from "./parse.js";
 
 // --- State ---
 const APP = {
-    files: {},
-    activeFile: null,
-
-    // Map Objects
+    data: null, // Holds the result from parse.js
+    charts: [], // uPlot instances
     map: null,
-    basePolyline: null, // The blue line (always visible)
-    highlightPolyline: null, // The red line (selection only)
-    positionMarker: null, // The moving dot
-    fullBounds: null, // The bounding box of the entire route
-
-    // Data
-    gpsData: [], // { lat, lon, ts, i }
-    records: [],
-    charts: [],
-    currentSelection: [],
-};
-
-// --- UI References ---
-const UI = {
-    loader: document.getElementById("loader"),
-    fileInput: document.getElementById("fileInput"),
-    fileSelect: document.getElementById("fileSelect"),
-    fileSelectWrapper: document.getElementById("fileSelectorWrapper"),
-    btnDownload: document.getElementById("btnDownload"),
-
-    mapContainer: document.getElementById("mapContainer"),
-    lapsContainer: document.getElementById("lapsContainer"),
-    statsContainer: document.getElementById("selectionStats"),
-
-    chartsContainer: document.getElementById("charts-container"),
-    chartsPlaceholder: document.getElementById("charts-placeholder"),
-
-    selectionTableContainer: document.getElementById("selectionTableContainer"),
-    selectionCountBadge: document.getElementById("selectionCountBadge"),
-
-    datatableEl: document.getElementById("datatable"),
-    radioInputs: document.querySelectorAll('input[name="dataView"]'),
-
-    copyAvgBtn: document.getElementById("copyAvgBtn"),
-    copyLapsBtn: document.getElementById("copyLapsBtn"),
-    copySelBtn: document.getElementById("copySelBtn"),
-    copyExplorerBtn: document.getElementById("copyExplorerBtn"),
+    layers: {
+        base: null, // Blue line (Full trace)
+        highlight: null, // Red line (Selection)
+        marker: null, // Moving dot
+    },
 };
 
 // --- Init ---
 function init() {
+    // Setup Map
     APP.map = L.map("map", { zoomControl: false }).setView([0, 0], 2);
     L.tileLayer(
         "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
         {
-            attribution: "&copy; OpenStreetMap, &copy; CartoDB",
+            attribution: "&copy; OpenStreetMap",
         }
     ).addTo(APP.map);
     L.control.zoom({ position: "bottomright" }).addTo(APP.map);
 
-    UI.fileInput.addEventListener("change", handleUpload);
-    UI.fileSelect.addEventListener("change", (e) => switchFile(e.target.value));
-    UI.btnDownload.addEventListener("click", downloadAllFiles);
-    UI.radioInputs.forEach((radio) =>
-        radio.addEventListener("change", renderExplorer)
-    );
+    // Event Listeners
+    document
+        .getElementById("fileInput")
+        .addEventListener("change", handleUpload);
 
-    UI.copyAvgBtn.addEventListener("click", () =>
-        copyTableToClipboard("avgTable")
-    );
-    UI.copyLapsBtn.addEventListener("click", () =>
-        copyTableToClipboard("lapSummaryTable")
-    );
-    UI.copySelBtn.addEventListener("click", () =>
-        copyDataArray(APP.currentSelection)
-    );
-    UI.copyExplorerBtn.addEventListener("click", () =>
-        copyTableToClipboard("datatable")
-    );
+    // Handle resize
+    window.addEventListener("resize", () => {
+        APP.charts.forEach((u) => {
+            if (u.root && u.root.parentElement) {
+                u.setSize({
+                    width: u.root.parentElement.clientWidth,
+                    height: 160,
+                });
+            }
+        });
+        if (APP.map) APP.map.invalidateSize();
+    });
 
+    // Bootstrap Tab fix for Map
     document.querySelectorAll('button[data-bs-toggle="pill"]').forEach((el) => {
         el.addEventListener("shown.bs.tab", () => {
             APP.map.invalidateSize();
-            if (APP.fullBounds) APP.map.fitBounds(APP.fullBounds);
+            if (APP.data && APP.data.bounds) APP.map.fitBounds(APP.data.bounds);
         });
     });
+
+    // Listen for Explorer Tab changes to render Explorer view
+    document
+        .getElementById("explorer-tab")
+        .addEventListener("shown.bs.tab", () => {
+            if (APP.data) renderExplorer();
+        });
 }
 
-// --- Parsing ---
+// --- Upload & Process ---
 async function handleUpload(e) {
-    const files = e.target.files;
-    if (!files.length) return;
+    const file = e.target.files[0];
+    if (!file) return;
 
-    UI.loader.style.display = "flex";
-    APP.files = {};
-    UI.fileSelect.innerHTML = "";
+    document.getElementById("loader").style.display = "flex";
 
     try {
-        for (const file of files) {
-            const data = await parseFitFile(file);
-            APP.files[file.name] = data;
+        // 1. Parse Data
+        APP.data = await parseFitData(file);
 
-            const option = document.createElement("option");
-            option.value = file.name;
-            option.text = file.name;
-            UI.fileSelect.appendChild(option);
-        }
+        // 2. Reset UI
+        resetUI();
 
-        if (Object.keys(APP.files).length > 0) {
-            UI.fileSelectWrapper.classList.remove("d-none");
-            UI.fileSelectWrapper.classList.add("d-flex");
-            UI.btnDownload.disabled = false;
-            switchFile(Object.keys(APP.files)[0]);
-        }
+        // 3. Render Components
+        renderMap();
+        renderCharts();
+        renderLaps();
+        renderTable(APP.data.records); // Full record table
+
+        // Show file name in dropdown (visual only for now)
+        const select = document.getElementById("fileSelect");
+        select.innerHTML = "";
+        const opt = document.createElement("option");
+        opt.text = file.name;
+        select.appendChild(opt);
+        document
+            .getElementById("fileSelectorWrapper")
+            .classList.remove("d-none");
+        document.getElementById("fileSelectorWrapper").classList.add("d-flex");
     } catch (err) {
         console.error(err);
-        alert("Error: " + err.message);
+        alert("Error parsing file: " + err.message);
     } finally {
-        UI.loader.style.display = "none";
+        document.getElementById("loader").style.display = "none";
     }
 }
 
-function parseFitFile(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const parser = new FitParser({
-                force: true,
-                speedUnit: "km/h",
-                lengthUnit: "km",
-                temperatureUnit: "celsius",
-                elapsedRecordField: true,
-                mode: "both",
-            });
-            parser.parse(e.target.result, (err, data) => {
-                if (err) reject(err);
-                else resolve(data);
-            });
-        };
-        reader.onerror = reject;
-        reader.readAsArrayBuffer(file);
-    });
-}
+// --- Map Logic ---
+function renderMap() {
+    const { gps, bounds } = APP.data;
+    const container = document.getElementById("mapContainer");
 
-// --- Switching Files ---
-function switchFile(fileName) {
-    APP.activeFile = fileName;
-    const data = APP.files[fileName];
-    APP.records = data.records || [];
-    APP.currentSelection = [];
-
-    // Build GPS Index with Timestamps for filtering
-    APP.gpsData = [];
-    APP.records.forEach((r, i) => {
-        if (r.position_lat && r.position_long) {
-            APP.gpsData.push({
-                i: i,
-                lat: r.position_lat,
-                lon: r.position_long,
-                ts: new Date(r.timestamp).getTime() / 1000, // seconds
-            });
-        }
-    });
-
-    // Reset Chart Area
-    APP.charts.forEach((u) => u.destroy());
-    APP.charts = [];
-    UI.chartsContainer.innerHTML = "";
-    UI.selectionTableContainer.classList.add("d-none");
-    UI.statsContainer.classList.add("d-none");
-
-    UI.chartsPlaceholder.classList.remove("d-none");
-    UI.chartsPlaceholder.classList.add("d-flex");
-
-    // Render Views
-    initMap(APP.gpsData); // Draw the permanent full trace
-    renderLaps(data.laps);
-    renderCharts(APP.records);
-
-    if (document.getElementById("explorer").classList.contains("active")) {
-        renderExplorer();
-    }
-}
-
-// --- MAP LOGIC ---
-function initMap(gpsPoints) {
-    // Clear existing layers
-    if (APP.basePolyline) APP.map.removeLayer(APP.basePolyline);
-    if (APP.highlightPolyline) APP.map.removeLayer(APP.highlightPolyline);
-    if (APP.positionMarker) APP.map.removeLayer(APP.positionMarker);
-
-    APP.basePolyline = null;
-    APP.highlightPolyline = null;
-    APP.fullBounds = null;
-
-    if (!gpsPoints || gpsPoints.length === 0) {
-        UI.mapContainer.classList.add("d-none");
+    if (!gps || !gps.length) {
+        container.classList.add("d-none");
         return;
     }
+    container.classList.remove("d-none");
 
-    UI.mapContainer.classList.remove("d-none");
+    // Cleanup old layers
+    if (APP.layers.base) APP.map.removeLayer(APP.layers.base);
+    if (APP.layers.highlight) APP.map.removeLayer(APP.layers.highlight);
+    if (APP.layers.marker) APP.map.removeLayer(APP.layers.marker);
 
-    // 1. Draw the Full Trace (Blue, persistent)
-    const latLongs = gpsPoints.map((p) => [p.lat, p.lon]);
-    APP.basePolyline = L.polyline(latLongs, {
-        color: "#2563eb", // Blue
-        weight: 3,
-        opacity: 0.6,
-    }).addTo(APP.map);
+    // 1. Base Layer (Blue - Always Full Trace)
+    APP.layers.base = L.polyline(
+        gps.map((p) => [p.lat, p.lon]),
+        {
+            color: "#2563eb",
+            weight: 3,
+            opacity: 0.6,
+        }
+    ).addTo(APP.map);
 
-    // 2. Initialize Highlight Layer (Red, empty initially)
-    APP.highlightPolyline = L.polyline([], {
-        color: "#dc2626", // Red
+    // 2. Highlight Layer (Red - Initially Empty)
+    APP.layers.highlight = L.polyline([], {
+        color: "#dc2626",
         weight: 4,
         opacity: 1,
     }).addTo(APP.map);
 
-    // 3. Initialize Marker
-    APP.positionMarker = L.circleMarker([0, 0], {
+    // 3. Marker
+    APP.layers.marker = L.circleMarker([0, 0], {
         radius: 6,
-        fillColor: "#fff",
         color: "#2563eb",
-        weight: 3,
+        fillColor: "#fff",
+        fillOpacity: 1,
         opacity: 0,
-        fillOpacity: 0,
     }).addTo(APP.map);
 
-    // 4. Save Bounds and Fit Map
-    APP.fullBounds = APP.basePolyline.getBounds();
-
+    // 4. Fit Bounds
     setTimeout(() => {
         APP.map.invalidateSize();
-        APP.map.fitBounds(APP.fullBounds, { padding: [30, 30] });
+        APP.map.fitBounds(bounds, { padding: [30, 30] });
     }, 100);
 }
 
-function syncMapSelection(minX, maxX) {
-    if (!APP.gpsData.length) return;
+function updateMapSelection(minTs, maxTs) {
+    if (!APP.data.gps.length) return;
 
-    // 1. Reset: If no range provided, clear highlight and zoom out
-    if (minX === null || maxX === null) {
-        APP.highlightPolyline.setLatLngs([]);
-        if (APP.fullBounds) {
-            APP.map.fitBounds(APP.fullBounds, { padding: [30, 30] });
-        }
+    // Filter GPS points based on timestamp range
+    const segment = APP.data.gps.filter((p) => p.ts >= minTs && p.ts <= maxTs);
+
+    if (segment.length > 0) {
+        const latlngs = segment.map((p) => [p.lat, p.lon]);
+        APP.layers.highlight.setLatLngs(latlngs);
+        APP.map.fitBounds(L.latLngBounds(latlngs), { padding: [50, 50] });
+    }
+}
+
+function resetMapState() {
+    if (!APP.data || !APP.data.bounds) return;
+    APP.layers.highlight.setLatLngs([]); // Clear red line
+    APP.map.fitBounds(APP.data.bounds, { padding: [30, 30] }); // Zoom to full
+}
+
+function syncMarker(idx) {
+    if (!APP.data.gps.length) return;
+    // Find GPS point matching record index
+    const p = APP.data.gps.find((p) => p.i === idx);
+    if (p) {
+        APP.layers.marker.setLatLng([p.lat, p.lon]).setStyle({ opacity: 1 });
+    }
+}
+
+// --- Dynamic Charts ---
+function renderCharts() {
+    const { records, fields } = APP.data;
+    const container = document.getElementById("charts-container");
+    container.innerHTML = "";
+    document.getElementById("charts-placeholder").classList.add("d-none");
+
+    if (fields.length === 0) {
+        container.innerHTML = `<div class="text-center text-muted mt-5">No chartable data found.</div>`;
         return;
     }
 
-    // 2. Filter GPS points in range
-    const selectedPoints = APP.gpsData.filter(
-        (p) => p.ts >= minX && p.ts <= maxX
+    // X-Axis: Time in seconds
+    const xData = records.map((r) =>
+        r.timestamp instanceof Date
+            ? r.timestamp.getTime() / 1000
+            : new Date(r.timestamp).getTime() / 1000
     );
+    const sync = uPlot.sync("fitSync");
 
-    if (selectedPoints.length > 0) {
-        const latLongs = selectedPoints.map((p) => [p.lat, p.lon]);
-
-        // Draw Highlight
-        APP.highlightPolyline.setLatLngs(latLongs);
-
-        // Zoom to Highlight Bounds
-        const bounds = L.latLngBounds(latLongs);
-        APP.map.fitBounds(bounds, { padding: [50, 50] });
-    }
-}
-
-function syncMapCursor(idx) {
-    if (!APP.gpsData.length || !APP.positionMarker) return;
-
-    // Find nearest point
-    const point =
-        APP.gpsData.find((p) => p.i === idx) ||
-        APP.gpsData.find((p) => p.i > idx - 5 && p.i < idx + 5);
-
-    if (point) {
-        APP.positionMarker.setLatLng([point.lat, point.lon]);
-        APP.positionMarker.setStyle({ opacity: 1, fillOpacity: 1 });
-    } else {
-        APP.positionMarker.setStyle({ opacity: 0, fillOpacity: 0 });
-    }
-}
-
-// --- CHARTS ---
-function renderCharts(records) {
-    if (!records || records.length === 0) return;
-
-    UI.chartsPlaceholder.classList.remove("d-flex");
-    UI.chartsPlaceholder.classList.add("d-none");
-
-    const ignore = [
-        "timestamp",
-        "position_lat",
-        "position_long",
-        "elapsed_time",
-        "distance",
-        "timer_time",
-    ];
-    const keys = Object.keys(records[0]).filter((k) => {
-        if (ignore.includes(k)) return false;
-        return records.some((r) => typeof r[k] === "number");
-    });
-
-    const xData = records.map((r) => new Date(r.timestamp).getTime() / 1000);
-    const sync = uPlot.sync("appSync");
-
-    keys.forEach((key) => {
-        const yData = records.map((r) => r[key] ?? null);
-        const color = getChartColor(key);
-
+    // Generate a chart for every detected field
+    fields.forEach((field, i) => {
         const div = document.createElement("div");
         div.className = "chart-wrapper";
-        UI.chartsContainer.appendChild(div);
+        container.appendChild(div);
+
+        const yData = records.map((r) => r[field] ?? null);
+        const color = getColor(i);
 
         const u = new uPlot(
             {
                 width: div.clientWidth,
                 height: 160,
-                title: "",
                 cursor: {
                     sync: { key: sync.key, setSeries: true },
-                    focus: { prox: 30 },
                     drag: { x: true, y: true, uni: 50 },
                 },
                 scales: { x: { time: true } },
                 axes: [
-                    {},
+                    {}, // X axis (Time)
                     {
-                        label: formatLabel(key),
-                        labelSize: 20,
+                        // Y axis (Value)
+                        label: formatLabel(field),
                         stroke: color,
-                        font: "10px Inter",
                         size: 50,
+                        labelSize: 20,
+                        font: "12px Inter",
                     },
                 ],
                 series: [
-                    {},
+                    {}, // X Series
                     {
                         stroke: color,
-                        width: 1.5,
-                        fill: color + "10",
-                        label: formatLabel(key),
+                        width: 2,
+                        fill: color + "15",
+                        label: formatLabel(field),
                     },
                 ],
                 hooks: {
                     setCursor: [
                         (u) => {
-                            if (u.cursor.idx != null)
-                                syncMapCursor(u.cursor.idx);
+                            if (u.cursor.idx) syncMarker(u.cursor.idx);
                         },
                     ],
-                    setSelect: [
-                        (u) => {
-                            updateSelectionStats(u);
-                        },
-                    ],
+                    setSelect: [(u) => handleSelection(u)],
                 },
             },
             [xData, yData],
@@ -361,134 +248,167 @@ function renderCharts(records) {
     });
 }
 
-function updateSelectionStats(u) {
-    // Case: Reset / Zoom Out (Double Click)
+function handleSelection(u) {
+    // Double Click / Reset (Zoom Out)
     if (u.select.width === 0) {
-        UI.statsContainer.classList.add("d-none");
-        UI.selectionTableContainer.classList.add("d-none");
-        APP.currentSelection = [];
-
-        // Reset Map to full view
-        syncMapSelection(null, null);
+        document.getElementById("selectionStats").classList.add("d-none");
+        document
+            .getElementById("selectionTableContainer")
+            .classList.add("d-none");
+        resetMapState(); // Zoom map to full
         return;
     }
 
-    const minX = u.posToVal(u.select.left, "x");
-    const maxX = u.posToVal(u.select.left + u.select.width, "x");
+    // Get Range
+    const min = u.posToVal(u.select.left, "x");
+    const max = u.posToVal(u.select.left + u.select.width, "x");
 
     // Filter Data
-    const subset = APP.records.filter((r) => {
-        const t = new Date(r.timestamp).getTime() / 1000;
-        return t >= minX && t <= maxX;
+    const subset = APP.data.records.filter((r) => {
+        const t =
+            r.timestamp instanceof Date
+                ? r.timestamp.getTime() / 1000
+                : new Date(r.timestamp).getTime() / 1000;
+        return t >= min && t <= max;
     });
 
-    if (subset.length === 0) return;
-    APP.currentSelection = subset;
-
-    // Update Tables
-    renderAvgTable(subset);
-    renderSelectionTable(subset);
-
-    // Update Map (Zoom to bounds + Highlight)
-    syncMapSelection(minX, maxX);
+    if (subset.length) {
+        renderAvgTable(subset);
+        renderTable(subset, true); // Render subset into selection table
+        updateMapSelection(min, max); // Zoom map to selection
+    }
 }
 
-// --- TABLE RENDERERS ---
-function renderAvgTable(subset) {
-    UI.statsContainer.classList.remove("d-none");
+// --- Tables ---
 
-    const first = subset[0];
-    const last = subset[subset.length - 1];
-    const duration =
-        (new Date(last.timestamp) - new Date(first.timestamp)) / 1000;
-    const dist =
-        last.distance && first.distance ? last.distance - first.distance : 0;
+function renderTable(data, isSelection = false) {
+    const tableId = isSelection ? "#selectionTable" : "#datatable";
+    const container = document.getElementById("selectionTableContainer");
 
-    const avg = (key) => {
-        const valid = subset.filter((r) => typeof r[key] === "number");
-        if (!valid.length) return null;
-        return valid.reduce((a, b) => a + b[key], 0) / valid.length;
-    };
-
-    const rowData = [
-        {
-            index: "AVG",
-            total_elapsed_time: duration,
-            total_distance: dist,
-            avg_heart_rate: avg("heart_rate"),
-            avg_speed: avg("speed"),
-            avg_power: avg("power"),
-            avg_cadence: avg("cadence"),
-        },
-    ];
-
-    if ($.fn.DataTable.isDataTable("#avgTable")) {
-        $("#avgTable").DataTable().destroy();
+    if (isSelection) {
+        container.classList.remove("d-none");
+        document.getElementById(
+            "selectionCountBadge"
+        ).textContent = `${data.length} records`;
     }
 
+    if ($.fn.DataTable.isDataTable(tableId)) {
+        $(tableId).DataTable().destroy();
+        document.querySelector(tableId).innerHTML = "";
+    }
+
+    if (data.length === 0) return;
+
+    // Define Columns
+    // We always want Time and Distance first, then the dynamic fields
+    const dynamicKeys = APP.data.fields;
+
     const columns = [
-        { title: "#", data: "index", width: "10%" },
         {
             title: "Time",
-            data: "total_elapsed_time",
-            render: (d) => formatDuration(d),
+            data: "timestamp",
+            render: (d) => {
+                if (!d) return "-";
+                if (d instanceof Date) return d.toLocaleTimeString();
+                if (typeof d === "string" && d.includes("T"))
+                    return d.split("T")[1].replace("Z", "");
+                return String(d);
+            },
         },
         {
-            title: "Dist",
-            data: "total_distance",
-            render: (d) => (d || 0).toFixed(2),
+            title: "Dist (km)",
+            data: "distance",
+            render: (d) => (typeof d === "number" ? d.toFixed(3) : "-"),
         },
-        {
-            title: "Avg HR",
-            data: "avg_heart_rate",
-            render: (d) => (d ? Math.round(d) : "-"),
-        },
-        {
-            title: "Avg Spd",
-            data: "avg_speed",
-            render: (d) => (d || 0).toFixed(1),
-        },
-        {
-            title: "Avg Pwr",
-            data: "avg_power",
-            render: (d) => (d ? Math.round(d) : "-"),
-        },
-        {
-            title: "Avg Cad",
-            data: "avg_cadence",
-            render: (d) => (d ? Math.round(d) : "-"),
-        },
+        ...dynamicKeys.map((k) => ({
+            title: formatLabel(k),
+            data: k,
+            defaultContent: "-",
+            render: (d) =>
+                typeof d === "number" ? parseFloat(d.toFixed(1)) : d,
+        })),
     ];
 
-    $("#avgTable").DataTable({
-        data: rowData,
+    $(tableId).DataTable({
+        data: data,
         columns: columns,
-        paging: false,
-        searching: false,
-        info: false,
-        ordering: false,
-        dom: "t",
+        pageLength: isSelection ? 5 : 15,
+        lengthMenu: [5, 15, 50, 100],
+        searching: !isSelection, // Only search on explorer
+        ordering: false, // Performance optimization
+        scrollX: true,
+        dom: isSelection
+            ? "<'row'<'col-12'tr>>" + "<'row mt-2 small'<'col-6'i><'col-6'p>>" // Compact
+            : "<'row mb-2'<'col-6'l><'col-6'f>>" +
+              "<'row'<'col-12'tr>>" +
+              "<'row mt-2'<'col-6'i><'col-6'p>>", // Full
     });
 }
 
-function renderLaps(laps) {
+function renderAvgTable(subset) {
+    document.getElementById("selectionStats").classList.remove("d-none");
+    const table = document.getElementById("avgTable");
+    table.innerHTML = "";
+
+    const metrics = APP.data.fields; // Use detected fields
+
+    // Header
+    let html = "<thead><tr>";
+    html += "<th>Time</th><th>Dist</th>";
+    metrics.forEach((k) => (html += `<th>Avg ${formatLabel(k)}</th>`));
+    html += "</tr></thead><tbody><tr>";
+
+    // Data
+    const first = subset[0];
+    const last = subset[subset.length - 1];
+
+    const t1 =
+        first.timestamp instanceof Date
+            ? first.timestamp.getTime()
+            : new Date(first.timestamp).getTime();
+    const t2 =
+        last.timestamp instanceof Date
+            ? last.timestamp.getTime()
+            : new Date(last.timestamp).getTime();
+
+    const time = (t2 - t1) / 1000;
+    const dist = (last.distance || 0) - (first.distance || 0);
+
+    html += `<td>${formatDuration(time)}</td><td>${dist.toFixed(2)}</td>`;
+
+    metrics.forEach((k) => {
+        const valid = subset.filter((r) => typeof r[k] === "number");
+        const avg = valid.length
+            ? valid.reduce((a, b) => a + b[k], 0) / valid.length
+            : 0;
+        html += `<td>${avg.toFixed(1)}</td>`;
+    });
+
+    html += "</tr></tbody>";
+    table.innerHTML = html;
+}
+
+function renderLaps() {
+    const laps = APP.data.laps;
+    const container = document.getElementById("lapsContainer");
+
+    if (!laps || !laps.length) {
+        container.classList.add("d-none");
+        return;
+    }
+    container.classList.remove("d-none");
+
     const table = $("#lapSummaryTable");
     if ($.fn.DataTable.isDataTable("#lapSummaryTable")) {
         table.DataTable().destroy();
     }
     document.getElementById("lapSummaryTable").innerHTML = "";
 
-    if (!laps || laps.length === 0) {
-        UI.lapsContainer.classList.add("d-none");
-        return;
-    }
-    UI.lapsContainer.classList.remove("d-none");
-
     const columns = [
         {
             title: "#",
             data: null,
-            width: "10%",
+            width: "5%",
             render: (d, t, r, m) => m.row + 1,
         },
         {
@@ -502,14 +422,14 @@ function renderLaps(laps) {
             render: (d) => (d || 0).toFixed(2),
         },
         {
+            title: "Avg Speed",
+            data: "avg_speed",
+            render: (d) => (d || 0).toFixed(1),
+        },
+        {
             title: "Avg HR",
             data: "avg_heart_rate",
             render: (d) => (d ? Math.round(d) : "-"),
-        },
-        {
-            title: "Avg Spd",
-            data: "avg_speed",
-            render: (d) => (d || 0).toFixed(1),
         },
         {
             title: "Avg Pwr",
@@ -535,59 +455,22 @@ function renderLaps(laps) {
     });
 }
 
-function renderSelectionTable(data) {
-    UI.selectionTableContainer.classList.remove("d-none");
-    UI.selectionCountBadge.textContent = `${data.length} records`;
-
-    if ($.fn.DataTable.isDataTable("#selectionTable")) {
-        $("#selectionTable").DataTable().destroy();
-        document.getElementById("selectionTable").innerHTML = "";
-    }
-
-    const keys = Object.keys(data[0]).filter((k) =>
-        [
-            "timestamp",
-            "distance",
-            "speed",
-            "power",
-            "heart_rate",
-            "cadence",
-            "altitude",
-        ].includes(k)
-    );
-
-    const columns = keys.map((k) => ({
-        title: formatLabel(k),
-        data: k,
-        defaultContent: "-",
-        render: function (d) {
-            if (typeof d === "number") return Math.round(d * 10) / 10;
-            if (typeof d === "string" && d.includes("T"))
-                return d.split("T")[1].replace("Z", "");
-            return d;
-        },
-    }));
-
-    $("#selectionTable").DataTable({
-        data: data,
-        columns: columns,
-        pageLength: 5,
-        lengthMenu: [5, 10, 25, 100],
-        ordering: false,
-        searching: false,
-        dom: "<'row'<'col-12'tr>>" + "<'row mt-2 small'<'col-6'i><'col-6'p>>",
-    });
-}
-
-// --- EXPLORER ---
 function renderExplorer() {
+    // We simply reuse the main renderTable for the 'Explorer' tab records view
+    // The tab listener at init triggers this
     const viewType = document.querySelector(
         'input[name="dataView"]:checked'
     ).value;
-    const data = APP.files[APP.activeFile];
-    if (!data) return;
 
-    if (viewType === "raw") {
+    if (viewType === "records") {
+        document
+            .getElementById("explorer-table-container")
+            .classList.remove("d-none");
+        document
+            .getElementById("explorer-json-container")
+            .classList.add("d-none");
+        renderTable(APP.data.records, false);
+    } else if (viewType === "raw") {
         document
             .getElementById("explorer-table-container")
             .classList.add("d-none");
@@ -595,131 +478,52 @@ function renderExplorer() {
             .getElementById("explorer-json-container")
             .classList.remove("d-none");
         document.getElementById("json-code").textContent = JSON.stringify(
-            data,
+            APP.data.raw,
             null,
             2
         );
         hljs.highlightElement(document.getElementById("json-code"));
-        return;
+    } else {
+        // Laps or Sessions
+        document
+            .getElementById("explorer-table-container")
+            .classList.remove("d-none");
+        document
+            .getElementById("explorer-json-container")
+            .classList.add("d-none");
+        // Basic dump of other arrays for now
+        const data = APP.data[viewType] || [];
+        if (data.length) {
+            // Simple dynamic table for non-records
+            if ($.fn.DataTable.isDataTable("#datatable"))
+                $("#datatable").DataTable().destroy();
+            const keys = Object.keys(data[0]).slice(0, 10);
+            const cols = keys.map((k) => ({
+                title: k,
+                data: k,
+                defaultContent: "-",
+            }));
+            $("#datatable").DataTable({
+                data: data,
+                columns: cols,
+                scrollX: true,
+            });
+        }
     }
+}
 
-    document
-        .getElementById("explorer-table-container")
-        .classList.remove("d-none");
-    document.getElementById("explorer-json-container").classList.add("d-none");
-
-    const dataset = data[viewType];
-    if (!dataset || !dataset.length) {
-        UI.datatableEl.innerHTML = "";
-        return;
-    }
-
-    if ($.fn.DataTable.isDataTable("#datatable")) {
+// --- Utils ---
+function resetUI() {
+    APP.charts.forEach((u) => u.destroy());
+    APP.charts = [];
+    document.getElementById("charts-container").innerHTML = "";
+    document.getElementById("selectionTableContainer").classList.add("d-none");
+    document.getElementById("selectionStats").classList.add("d-none");
+    if ($.fn.DataTable.isDataTable("#datatable"))
         $("#datatable").DataTable().destroy();
-        UI.datatableEl.innerHTML = "";
-    }
-
-    const keys = Object.keys(dataset[0]);
-    const visibleKeys = keys.slice(0, 15);
-
-    const columns = visibleKeys.map((k) => ({
-        title: k.replace(/_/g, " "),
-        data: k,
-        defaultContent: "-",
-        render: function (d) {
-            if (typeof d === "number") return Math.round(d * 100) / 100;
-            if (typeof d === "string" && d.length > 10 && d.includes("T"))
-                return d.split("T")[1].replace("Z", "");
-            if (typeof d === "object" && d !== null) return "{...}";
-            return d;
-        },
-    }));
-
-    $("#datatable").DataTable({
-        data: dataset,
-        columns: columns,
-        pageLength: 15,
-        lengthMenu: [15, 50, 100],
-        scrollX: true,
-        deferRender: true,
-        orderClasses: false,
-        autoWidth: false,
-        dom:
-            "<'row mb-2'<'col-6'l><'col-6'f>>" +
-            "<'row'<'col-12'tr>>" +
-            "<'row mt-2'<'col-6'i><'col-6'p>>",
-    });
-}
-
-// --- UTILS ---
-async function copyTableToClipboard(tableId) {
-    const table = document.getElementById(tableId);
-    if (!table) return;
-
-    let csv = [];
-    const thead = table.querySelector("thead");
-    if (thead) {
-        const headers = [];
-        thead
-            .querySelectorAll("th")
-            .forEach((th) => headers.push(th.innerText));
-        csv.push(headers.join("\t"));
-    }
-
-    const rows = table.querySelectorAll("tbody tr");
-    rows.forEach((row) => {
-        const cols = row.querySelectorAll("td");
-        if (cols.length === 0) return;
-        const rowData = [];
-        cols.forEach((col) => rowData.push(col.innerText));
-        csv.push(rowData.join("\t"));
-    });
-
-    await navigator.clipboard.writeText(csv.join("\n"));
-
-    const btn =
-        document.querySelector(
-            `button[id*="${tableId.replace("Table", "").toLowerCase()}"]`
-        ) || document.getElementById("copyExplorerBtn");
-    if (btn) {
-        const original = btn.innerHTML;
-        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="#198754" class="bi bi-check-lg" viewBox="0 0 16 16"><path d="M12.736 3.97a.733.733 0 0 1 1.047 0c.286.289.29.756.01 1.05L7.88 12.01a.733.733 0 0 1-1.065.02L3.217 8.384a.757.757 0 0 1 0-1.06.733.733 0 0 1 1.047 0l3.052 3.093 5.4-6.425a.247.247 0 0 1 .02-.022Z"/></svg>`;
-        setTimeout(() => (btn.innerHTML = original), 1500);
-    }
-}
-
-async function copyDataArray(arr) {
-    if (!arr || !arr.length) return;
-    const csv = toCSV(arr, "\t");
-    await navigator.clipboard.writeText(csv);
-
-    const btn = document.getElementById("copySelBtn");
-    const original = btn.innerHTML;
-    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="#198754" class="bi bi-check-lg" viewBox="0 0 16 16"><path d="M12.736 3.97a.733.733 0 0 1 1.047 0c.286.289.29.756.01 1.05L7.88 12.01a.733.733 0 0 1-1.065.02L3.217 8.384a.757.757 0 0 1 0-1.06.733.733 0 0 1 1.047 0l3.052 3.093 5.4-6.425a.247.247 0 0 1 .02-.022Z"/></svg>`;
-    setTimeout(() => (btn.innerHTML = original), 1500);
-}
-
-async function downloadAllFiles() {
-    const zip = new JSZip();
-    for (const [name, data] of Object.entries(APP.files)) {
-        const folder = zip.folder(name);
-        if (data.records) folder.file("records.csv", toCSV(data.records));
-        if (data.laps) folder.file("laps.csv", toCSV(data.laps));
-        if (data.sessions) folder.file("sessions.csv", toCSV(data.sessions));
-    }
-    const content = await zip.generateAsync({ type: "blob" });
-    saveAs(content, "fit_export.zip");
-}
-
-function toCSV(arr, delimiter = ",") {
-    if (!arr.length) return "";
-    const headers = Object.keys(arr[0]);
-    const rows = arr.map((obj) =>
-        headers
-            .map((h) => `"${String(obj[h] ?? "").replace(/"/g, '""')}"`)
-            .join(delimiter)
-    );
-    return [headers.join(delimiter), ...rows].join("\n");
+    if ($.fn.DataTable.isDataTable("#selectionTable"))
+        $("#selectionTable").DataTable().destroy();
+    document.getElementById("datatable").innerHTML = "";
 }
 
 function formatLabel(str) {
@@ -727,30 +531,29 @@ function formatLabel(str) {
         .replace(/_/g, " ")
         .replace(/\b\w/g, (l) => l.toUpperCase())
         .replace("Heart Rate", "HR")
-        .replace("Cadence", "Cad");
+        .replace("Cadence", "Cad")
+        .replace("Altitude", "Alt");
 }
 
-function formatDuration(seconds) {
-    if (!seconds) return "-";
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}:${s.toString().padStart(2, "0")}`;
+function formatDuration(s) {
+    if (!s) return "-";
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
-function getChartColor(key) {
-    if (key.includes("heart")) return "#ef4444";
-    if (key.includes("speed")) return "#3b82f6";
-    if (key.includes("power")) return "#f59e0b";
-    if (key.includes("cadence")) return "#8b5cf6";
-    if (key.includes("alt")) return "#10b981";
-    return "#6b7280";
+function getColor(i) {
+    const colors = [
+        "#3b82f6",
+        "#ef4444",
+        "#f59e0b",
+        "#10b981",
+        "#8b5cf6",
+        "#ec4899",
+        "#6366f1",
+    ];
+    return colors[i % colors.length];
 }
 
-window.addEventListener("resize", () => {
-    APP.charts.forEach((u) => {
-        const div = u.root.parentElement;
-        u.setSize({ width: div.clientWidth, height: 160 });
-    });
-});
-
+// Run
 init();
